@@ -4,7 +4,7 @@
    Base de données locale (IndexedDB) — tout reste sur le téléphone
    ===================================================================== */
 const DB_NAME = 'muscu';
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 let db;
 
 function openDB() {
@@ -16,6 +16,8 @@ function openDB() {
       if (!d.objectStoreNames.contains('templates')) d.createObjectStore('templates', { keyPath: 'id' });
       if (!d.objectStoreNames.contains('workouts')) d.createObjectStore('workouts', { keyPath: 'id' });
       if (!d.objectStoreNames.contains('meta')) d.createObjectStore('meta', { keyPath: 'key' });
+      // Exercices perso avec leurs muscles choisis à la main (clé = nom sans accents ni majuscules)
+      if (!d.objectStoreNames.contains('custom')) d.createObjectStore('custom', { keyPath: 'key' });
     };
     r.onsuccess = () => resolve(r.result);
     r.onerror = () => reject(r.error);
@@ -77,6 +79,7 @@ const state = {
   draft: null,        // séance en cours (sauvegardée en continu)
   activeProgram: null,
   lastExport: null,
+  custom: {},         // exercices perso : clé → { key, name, primary, secondary }
   progressExercise: null,
   progressMetric: 'weight',
   volumePeriod: 'week',
@@ -125,6 +128,7 @@ async function loadAll() {
   state.workouts = (await dbAll('workouts')).sort((a, b) => b.date.localeCompare(a.date));
   state.draft = (await dbGet('meta', 'draft'))?.value || null;
   state.lastExport = (await dbGet('meta', 'lastExport'))?.value || null;
+  state.custom = Object.fromEntries((await dbAll('custom')).map((c) => [c.key, c]));
 }
 
 const saveDraft = () => (state.draft ? dbPut('meta', { key: 'draft', value: state.draft }) : dbDel('meta', 'draft'));
@@ -517,9 +521,9 @@ function computeVolume(workouts) {
   const unknown = new Set();
   for (const w of workouts) {
     for (const ex of w.exercises) {
-      const e = findExercise(ex.name);
-      if (!e) { unknown.add(ex.name); continue; }
-      const { primary, secondary } = musclesFor(e.group, e.nameN);
+      const muscles = exerciseMuscles(ex.name);
+      if (!muscles || !(muscles.primary.length + muscles.secondary.length)) { unknown.add(ex.name); continue; }
+      const { primary, secondary } = muscles;
       for (const m of primary) (vol[m] ||= { direct: 0, indirect: 0 }).direct += ex.sets.length;
       for (const m of secondary) (vol[m] ||= { direct: 0, indirect: 0 }).indirect += ex.sets.length;
     }
@@ -575,7 +579,10 @@ function viewVolume() {
     <p class="legend small"><i class="dot mp"></i><span><strong>Séries</strong> : le muscle est le principal de l'exercice</span></p>
     <p class="legend small"><i class="dot ms"></i><span><strong>Indirectes</strong> : il travaille en soutien (ex : triceps au développé couché)</span></p>
     <p class="muted small">Repère courant pour progresser : environ 10 à 20 séries par muscle et par semaine.</p>
-    ${unknown.size ? `<p class="muted small">Non comptés (exercices perso) : ${[...unknown].map(esc).join(', ')}</p>` : ''}`;
+    ${unknown.size ? `
+      <h3>Non comptés</h3>
+      <p class="muted small">Ces exercices perso n'ont pas encore de muscles. Touche-les pour les choisir :</p>
+      <div class="chips-wrap">${[...unknown].map((n) => `<button class="chip" data-action="define-muscles" data-name="${esc(n)}">${esc(n)} ›</button>`).join('')}</div>` : ''}`;
 }
 
 /* ---------- Réglages ---------- */
@@ -660,6 +667,7 @@ async function exportData() {
     programs: state.programs,
     templates: state.templates,
     workouts: state.workouts,
+    custom: Object.values(state.custom),
   };
   const name = `muscu-${new Date().toISOString().slice(0, 10)}.json`;
   const file = new File([JSON.stringify(data, null, 2)], name, { type: 'application/json' });
@@ -696,6 +704,8 @@ function isValidBackup(data) {
   const okEx = (e) => e && typeof e.name === 'string' && Array.isArray(e.sets) && e.sets.every(okSet);
   return data && Array.isArray(data.templates) && Array.isArray(data.workouts)
     && (data.programs === undefined || (Array.isArray(data.programs) && data.programs.every((p) => p && p.id && typeof p.name === 'string')))
+    && (data.custom === undefined || (Array.isArray(data.custom) && data.custom.every((c) => c && typeof c.key === 'string'
+      && typeof c.name === 'string' && Array.isArray(c.primary) && Array.isArray(c.secondary))))
     && data.templates.every((t) => t && t.id && typeof t.name === 'string' && Array.isArray(t.exercises))
     && data.workouts.every((w) => w && w.id && typeof w.date === 'string' && Array.isArray(w.exercises) && w.exercises.every(okEx));
 }
@@ -717,8 +727,9 @@ async function importData(file) {
     + 'Les données sont fusionnées : rien n\'est supprimé, les éléments déjà présents sont mis à jour.';
   if (!confirm(msg)) return;
 
-  const tx = db.transaction(['programs', 'templates', 'workouts'], 'readwrite');
+  const tx = db.transaction(['programs', 'templates', 'workouts', 'custom'], 'readwrite');
   programs.forEach((p) => tx.objectStore('programs').put(p));
+  (data.custom || []).forEach((c) => tx.objectStore('custom').put(c));
   data.templates.forEach((t) => tx.objectStore('templates').put(t));
   data.workouts.forEach((w) => tx.objectStore('workouts').put(w));
   await new Promise((res, rej) => { tx.oncomplete = res; tx.onerror = () => rej(tx.error); });
@@ -808,9 +819,20 @@ const LIBRARY = EXERCISE_GROUPS.flatMap((g) => g.items.map((item) => {
 }));
 const findExercise = (name) => LIBRARY.find((e) => e.nameN === norm(name.trim())) || null;
 
+// Muscles d'un exercice : bibliothèque, ou choisis à la main pour un exercice perso (null si inconnus)
+function exerciseMuscles(name) {
+  const e = findExercise(name);
+  if (e) return musclesFor(e.group, e.nameN);
+  const c = state.custom[norm(name.trim())];
+  return c ? { primary: c.primary, secondary: c.secondary } : null;
+}
+
 function allExercises() {
   const known = new Set(LIBRARY.map((e) => e.nameN));
   const custom = new Map();
+  for (const c of Object.values(state.custom)) {
+    if (!known.has(c.key)) custom.set(c.key, { name: c.name, group: 'perso', groupLabel: 'Perso', nameN: c.key, hay: c.key });
+  }
   const used = [...state.templates.flatMap((t) => t.exercises), ...state.workouts.flatMap((w) => w.exercises.map((e) => e.name))];
   for (const raw of used) {
     const name = raw.trim(), k = norm(name);
@@ -862,7 +884,7 @@ function renderPicker() {
   const typed = picker.query.trim();
   const exact = results.some((e) => e.nameN === norm(typed));
   const create = typed && !exact
-    ? `<div class="pk-row"><button class="pk-main create" data-pk="toggle" data-name="${esc(typed)}"><span class="pk-check">✓</span><span class="pk-name">+ Créer « ${esc(typed)} »</span></button></div>`
+    ? `<div class="pk-row"><button class="pk-main create" data-pk="create" data-name="${esc(typed)}"><span class="pk-check">+</span><span class="pk-name">Créer « ${esc(typed)} »<span class="pk-group">Exercice perso : tu choisis ses muscles</span></span></button></div>`
     : '';
   const rows = results.slice(0, 150).map((e) => `
     <div class="pk-row ${picker.selected.includes(e.name) ? 'on' : ''}">
@@ -870,7 +892,7 @@ function renderPicker() {
         <span class="pk-check">✓</span>
         <span class="pk-name">${esc(e.name)}<span class="pk-group">${esc(e.groupLabel)}</span></span>
       </button>
-      ${e.group !== 'perso' ? `<button class="pk-info" data-pk="info" data-name="${esc(e.name)}" aria-label="Voir la fiche">i</button>` : ''}
+      <button class="pk-info" data-pk="info" data-name="${esc(e.name)}" aria-label="Voir la fiche">i</button>
     </div>`).join('');
   $picker.querySelector('.picker-list').innerHTML = rows + create
     + (!rows && !create ? '<p class="muted" style="text-align:center;padding:30px 0">Aucun exercice trouvé</p>' : '');
@@ -903,10 +925,16 @@ $picker.addEventListener('click', (e) => {
       const i = picker.selected.indexOf(name);
       if (i >= 0) picker.selected.splice(i, 1);
       else picker.selected.push(name);
-      // Après avoir créé un exercice perso, on vide la recherche pour en chercher un autre
-      if (btn.classList.contains('create')) { picker.query = ''; $pkSearch.value = ''; }
       return renderPicker();
     }
+    case 'create':
+      return openMuscleEditor(btn.dataset.name, true, (name) => {
+        if (!picker.selected.includes(name)) picker.selected.push(name);
+        // On vide la recherche pour pouvoir en chercher un autre
+        picker.query = '';
+        $pkSearch.value = '';
+        renderPicker();
+      });
     case 'info':
       return openSheet(btn.dataset.name);
     case 'done': {
@@ -922,26 +950,29 @@ $picker.addEventListener('click', (e) => {
    ===================================================================== */
 const $sheet = document.getElementById('sheet');
 
+const muscleLabels = (list) => list.map((m) => MUSCLE_LABELS[m]).join(', ');
+
 function openSheet(name) {
   const e = findExercise(name);
-  const { primary, secondary } = e ? musclesFor(e.group, e.nameN) : { primary: [], secondary: [] };
-  const labels = (list) => list.map((m) => MUSCLE_LABELS[m]).join(', ');
+  const muscles = exerciseMuscles(name);
+  const hasMuscles = muscles && muscles.primary.length + muscles.secondary.length > 0;
 
-  const map = primary.length ? `
+  const map = hasMuscles ? `
     <div class="sheet-maps">
-      <figure>${bodySVG('front', primary, secondary)}<figcaption>Devant</figcaption></figure>
-      <figure>${bodySVG('back', primary, secondary)}<figcaption>Derrière</figcaption></figure>
+      <figure>${bodySVG('front', muscles.primary, muscles.secondary)}<figcaption>Devant</figcaption></figure>
+      <figure>${bodySVG('back', muscles.primary, muscles.secondary)}<figcaption>Derrière</figcaption></figure>
     </div>
-    <p class="legend"><i class="dot mp"></i><span><strong>Principal :</strong> ${labels(primary)}</span></p>
-    ${secondary.length ? `<p class="legend"><i class="dot ms"></i><span><strong>Secondaire :</strong> ${labels(secondary)}</span></p>` : ''}`
-    : '<p class="muted">Exercice perso : pas de fiche détaillée.</p>';
+    ${muscles.primary.length ? `<p class="legend"><i class="dot mp"></i><span><strong>Principal :</strong> ${muscleLabels(muscles.primary)}</span></p>` : ''}
+    ${muscles.secondary.length ? `<p class="legend"><i class="dot ms"></i><span><strong>Secondaire :</strong> ${muscleLabels(muscles.secondary)}</span></p>` : ''}`
+    : '<p class="muted">Pas encore de muscles pour cet exercice perso : il n\'est pas compté dans le Volume.</p>';
 
   $sheet.querySelector('.sheet-body').innerHTML = `
     <div class="sheet-head">
-      <div><h2>${esc(name)}</h2>${e ? `<span class="muted small">${esc(e.groupLabel)}</span>` : ''}</div>
+      <div><h2>${esc(name)}</h2><span class="muted small">${e ? esc(e.groupLabel) : 'Exercice perso'}</span></div>
       <button class="icon-btn" data-sheet="close" aria-label="Fermer">✕</button>
     </div>
-    ${map}`;
+    ${map}
+    ${e ? '' : `<button class="btn btn-secondary" data-sheet="edit-muscles" data-name="${esc(name)}">✏️ ${hasMuscles ? 'Modifier' : 'Choisir'} les muscles</button>`}`;
   $sheet.hidden = false;
 }
 
@@ -949,8 +980,92 @@ function closeSheet() {
   $sheet.hidden = true;
 }
 
+/* ---------- Éditeur de muscles d'un exercice perso ---------- */
+// On choisit un « pinceau » (principal / secondaire) puis on touche les muscles sur le bonhomme ou dans la liste
+const cx = { name: '', isNew: false, mode: 'primary', primary: [], secondary: [], onSave: null };
+
+function openMuscleEditor(name, isNew, onSave) {
+  const existing = state.custom[norm(name.trim())];
+  Object.assign(cx, {
+    name: name.trim(), isNew, mode: 'primary', onSave,
+    primary: existing ? [...existing.primary] : [],
+    secondary: existing ? [...existing.secondary] : [],
+  });
+  $sheet.querySelector('.sheet-body').innerHTML = `
+    <div class="sheet-head">
+      <div><h2>${isNew ? 'Nouvel exercice' : 'Muscles de l\'exercice'}</h2>${isNew ? '' : `<span class="muted small">${esc(cx.name)}</span>`}</div>
+      <button class="icon-btn" data-sheet="close" aria-label="Fermer">✕</button>
+    </div>
+    ${isNew ? `<label class="field"><span>Nom de l'exercice</span><input id="cx-name" value="${esc(cx.name)}" autocomplete="off"></label>` : ''}
+    <p class="small">Choisis la couleur, puis touche les muscles sur le bonhomme ou dans la liste. Touche à nouveau pour enlever.</p>
+    <div class="seg two cx-mode"></div>
+    <div class="sheet-maps cx-maps"></div>
+    <div class="chips-wrap cx-chips"></div>
+    <button class="btn btn-primary" data-sheet="cx-save">${isNew ? 'Créer l\'exercice' : 'Enregistrer'}</button>`;
+  renderMuscleEditor();
+  $sheet.hidden = false;
+}
+
+function renderMuscleEditor() {
+  const body = $sheet.querySelector('.sheet-body');
+  const state_ = (m) => (cx.primary.includes(m) ? 'p' : cx.secondary.includes(m) ? 's' : '');
+  body.querySelector('.cx-mode').innerHTML = `
+    <button class="${cx.mode === 'primary' ? 'on' : ''}" data-sheet="cx-mode" data-mode="primary"><i class="dot mp"></i> Principal</button>
+    <button class="${cx.mode === 'secondary' ? 'on' : ''}" data-sheet="cx-mode" data-mode="secondary"><i class="dot ms"></i> Secondaire</button>`;
+  body.querySelector('.cx-maps').innerHTML = `
+    <figure>${bodySVG('front', cx.primary, cx.secondary)}<figcaption>Devant</figcaption></figure>
+    <figure>${bodySVG('back', cx.primary, cx.secondary)}<figcaption>Derrière</figcaption></figure>`;
+  body.querySelector('.cx-chips').innerHTML = Object.entries(MUSCLE_LABELS).map(([m, label]) =>
+    `<button class="chip ${state_(m)}" data-sheet="cx-muscle" data-m="${m}">${label}</button>`).join('');
+}
+
+function toggleMuscle(m) {
+  const other = cx.mode === 'primary' ? 'secondary' : 'primary';
+  cx[other] = cx[other].filter((x) => x !== m);
+  const list = cx[cx.mode];
+  cx[cx.mode] = list.includes(m) ? list.filter((x) => x !== m) : [...list, m];
+  renderMuscleEditor();
+}
+
+async function saveMuscleEditor() {
+  const input = document.getElementById('cx-name');
+  const name = (input ? input.value : cx.name).trim();
+  if (!name) return alert('Donne un nom à l\'exercice.');
+  if (cx.isNew && findExercise(name)) {
+    // Il existe déjà dans la bibliothèque : on le prend tel quel
+    closeSheet();
+    return cx.onSave(findExercise(name).name);
+  }
+  if (!cx.primary.length && !cx.secondary.length
+    && !confirm('Aucun muscle choisi : cet exercice ne sera pas compté dans le Volume.\n\nContinuer quand même ?')) return;
+  const rec = { key: norm(name), name, primary: cx.primary, secondary: cx.secondary, createdAt: new Date().toISOString() };
+  await dbPut('custom', rec);
+  state.custom[rec.key] = rec;
+  closeSheet();
+  toast(cx.isNew ? 'Exercice créé' : 'Muscles enregistrés');
+  cx.onSave(name);
+}
+
 $sheet.addEventListener('click', (e) => {
-  if (e.target === $sheet || e.target.closest('[data-sheet=close]')) closeSheet();
+  if (e.target === $sheet) return closeSheet();
+  // Toucher une zone du bonhomme dans l'éditeur
+  const zone = e.target.closest('.cx-maps path[data-m]');
+  if (zone) return toggleMuscle(zone.dataset.m);
+  const btn = e.target.closest('[data-sheet]');
+  if (!btn) return;
+  switch (btn.dataset.sheet) {
+    case 'close':
+      return closeSheet();
+    case 'edit-muscles':
+      return openMuscleEditor(btn.dataset.name, false, () => render());
+    case 'cx-mode':
+      cx.mode = btn.dataset.mode;
+      return renderMuscleEditor();
+    case 'cx-muscle':
+      return toggleMuscle(btn.dataset.m);
+    case 'cx-save':
+      return saveMuscleEditor();
+  }
 });
 
 // Évite que l'écran se mette en veille pendant la séance (si l'iPhone le permet)
@@ -1062,6 +1177,8 @@ $app.addEventListener('click', async (e) => {
     }
     case 'info':
       return openSheet(btn.dataset.name);
+    case 'define-muscles':
+      return openMuscleEditor(btn.dataset.name, false, () => render());
     case 'pick-exercises':
       return openPicker((names) => {
         const r = state.route;
@@ -1162,10 +1279,12 @@ document.querySelector('.tabbar').addEventListener('click', (e) => {
   }
   if ('serviceWorker' in navigator) {
     // Quand une nouvelle version de l'app vient d'être installée, on recharge pour l'afficher tout de suite
-    const hadController = !!navigator.serviceWorker.controller;
+    // (la toute première installation n'est pas une mise à jour : on ne recharge pas)
+    let hadController = !!navigator.serviceWorker.controller;
     let reloaded = false;
     navigator.serviceWorker.addEventListener('controllerchange', () => {
-      if (!hadController || reloaded) return;
+      if (!hadController) { hadController = true; return; }
+      if (reloaded) return;
       reloaded = true;
       location.reload();
     });
