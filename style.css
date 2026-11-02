@@ -149,6 +149,28 @@ input, textarea, select { font: inherit; }
 .hist-ex { margin: 8px 0 0; font-size: 15px; }
 .hist-ex strong { display: block; }
 
+/* ---------- Calendrier (Historique) ---------- */
+.cal-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+.cal-head h2 { font-size: 18px; text-transform: capitalize; }
+.cal-head .icon-btn { font-size: 22px; color: var(--text); }
+.cal-grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 4px; }
+.cal-wd { text-align: center; font-size: 12px; font-weight: 600; color: var(--muted); padding: 2px 0 4px; }
+.cal-day {
+  position: relative; height: 42px; min-width: 0; border: 0; border-radius: 10px; padding: 0;
+  background: transparent; color: var(--muted); font-size: 15px; font-variant-numeric: tabular-nums;
+}
+.cal-day.blank { visibility: hidden; }
+.cal-day.has { background: var(--surface-2); color: var(--text); font-weight: 700; }
+.cal-day.has::after {
+  content: ""; position: absolute; bottom: 5px; left: 50%; width: 6px; height: 6px; margin-left: -3px;
+  border-radius: 50%; background: var(--accent);
+}
+.cal-day.today { box-shadow: inset 0 0 0 2px var(--border); }
+.cal-day.sel { background: var(--accent); color: var(--accent-ink); }
+.cal-day.sel::after { background: var(--accent-ink); }
+.ex-head > .ex-title { cursor: default; }
+.empty-hist { text-align: center; padding: 12px 0; }
+
 /* ---------- Progrès ---------- */
 .select {
   width: 100%; min-height: 56px; padding: 0 44px 0 14px;
@@ -284,6 +306,27 @@ input, textarea, select { font: inherit; }
 .bodymap .mp { fill: #ff3b30; }
 .bodymap .ms { fill: #ff8a80; opacity: 0.75; }
 .bodymap .mh { fill: #ff3b30; }
+
+/* ---------- Progrès global ---------- */
+.down { color: var(--danger); }
+.global-hero { display: flex; flex-direction: column; align-items: center; text-align: center; gap: 2px; padding: 18px 12px; }
+.global-pct { font-size: 46px; font-weight: 800; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
+.pct-row { padding: 6px 0 10px; border-top: 1px solid var(--border); }
+.pct-row:first-child { border-top: 0; }
+.pct-main {
+  display: flex; align-items: center; gap: 8px; width: 100%; min-height: 44px; padding: 0;
+  background: none; border: 0; text-align: left; font-size: 16px;
+}
+.pct-name { flex: 1; font-weight: 600; }
+.pct-main strong { font-size: 18px; font-variant-numeric: tabular-nums; }
+.pct-chevron { width: 16px; color: var(--muted); text-align: center; }
+.pct-bar { height: 8px; border-radius: 99px; background: var(--surface-2); overflow: hidden; }
+.pct-bar span { display: block; height: 100%; border-radius: 99px; }
+.pct-bar .up { background: var(--ok); }
+.pct-bar .down { background: var(--danger); }
+.pct-detail { margin-top: 10px; padding: 4px 10px; background: var(--surface-2); border-radius: 12px; }
+.pct-ex { display: flex; justify-content: space-between; gap: 10px; padding: 8px 0; font-size: 15px; border-top: 1px solid var(--border); }
+.pct-ex:first-child { border-top: 0; }
 
 /* ---------- Poids de corps ---------- */
 .bw-stepper { grid-template-columns: 64px 1fr 64px; height: 64px; }
