@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0f0f12">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Muscu">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <link rel="icon" type="image/png" href="icons/icon-192.png">
+  <link rel="manifest" href="manifest.json">
+  <link rel="stylesheet" href="style.css">
+  <title>Muscu</title>
+</head>
+<body>
+  <main id="app"><p class="muted">Chargement…</p></main>
+
+  <div id="toast" role="status" aria-live="polite"></div>
+
+  <div id="picker" hidden>
+    <div class="picker-head">
+      <button class="link" data-pk="cancel">Annuler</button>
+      <strong>Ajouter des exercices</strong>
+      <span class="picker-spacer"></span>
+    </div>
+    <input class="picker-search" type="search" placeholder="Rechercher : curl, chest, squat…" autocomplete="off" autocorrect="off" spellcheck="false">
+    <div class="chips"></div>
+    <div class="picker-list"></div>
+    <div class="picker-foot"><button class="btn btn-primary" data-pk="done">Ajouter</button></div>
+  </div>
+
+  <nav class="tabbar">
+    <button class="tab" data-tab="train"><span class="ico">🏋️</span>Séance</button>
+    <button class="tab" data-tab="history"><span class="ico">📅</span>Historique</button>
+    <button class="tab" data-tab="progress"><span class="ico">📈</span>Progrès</button>
+    <button class="tab" data-tab="volume"><span class="ico">💪</span>Volume</button>
+    <button class="tab" data-tab="settings"><span class="ico">⚙️</span>Réglages</button>
+  </nav>
+
+  <div id="sheet" hidden><div class="sheet-body"></div></div>
+
+  <script src="exercises.js"></script>
+  <script src="muscles.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
