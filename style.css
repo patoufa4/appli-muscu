@@ -332,11 +332,23 @@ input, textarea, select { font: inherit; }
 .bw-stepper { grid-template-columns: 64px 1fr 64px; height: 64px; }
 .bw-stepper input { font-size: 30px; }
 
-/* ---------- Minuteur de repos ---------- */
+/* ---------- Minuteur de repos / remplacer un exercice ---------- */
+.ex-tools { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; margin-top: 8px; }
 .rest-btn {
-  display: block; width: 100%; margin-top: 8px; padding: 10px; min-height: 44px; text-align: left;
-  background: var(--surface-2); border: 0; border-radius: 10px; font-size: 15px;
+  display: block; width: 100%; padding: 10px 4px; min-height: 44px; text-align: center;
+  background: var(--surface-2); border: 0; border-radius: 10px; font-size: 14px; white-space: nowrap;
 }
+.ex-note {
+  display: block; width: 100%; margin: 8px 0 0; padding: 8px 10px; text-align: left;
+  background: rgba(255, 200, 80, 0.12); border: 0; border-radius: 10px;
+  color: #ffe2a8; font-size: 15px; white-space: pre-wrap;
+}
+.dialog-card textarea.dialog-input { resize: none; line-height: 1.4; font-size: 17px; }
+.swap-note {
+  margin: 8px 0 0; padding: 8px 10px; border-radius: 10px; font-size: 14px;
+  background: rgba(107, 79, 179, 0.2); color: #ddd0ff;
+}
+.swap-note .link { color: #ddd0ff; padding: 0 0 0 6px; }
 #rest {
   position: fixed; left: 10px; right: 10px; z-index: 15;
   bottom: calc(var(--safe-bottom) + 70px);
