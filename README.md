@@ -40,6 +40,17 @@ Tout est stocké **sur le téléphone** (IndexedDB), et l'app marche **sans rés
 - **Séance oubliée** : touche le jour dans le calendrier → *+ Ajouter une séance ce jour-là* → choisis
   la séance (ou une séance libre) et remplis les séries à la main.
 
+## Remplacer un exercice
+
+- Pendant la séance, bouton **⇄ Remplacer** sur chaque exercice (machine prise…) : choisis l'alternative
+  (la recherche s'ouvre sur le même muscle), elle prend sa place **pour cette séance seulement**.
+  « Remettre » pour revenir en arrière. Chaque exercice garde son propre suivi de progrès.
+
+## Notes par exercice
+
+- Bouton **📝 Note** sur chaque exercice en séance (ou dans sa fiche **i**) : réglage de la machine,
+  hauteur du siège… La note s'affiche sur l'exercice à chaque séance. Incluse dans l'export.
+
 ## Minuteur de repos
 
 - Quand tu coches ✓ une série, le chrono de repos démarre tout seul (barre en bas de l'écran),
