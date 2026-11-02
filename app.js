@@ -425,9 +425,6 @@ function viewWorkout() {
 /* ---------- Historique ---------- */
 function viewHistory() {
   if (state.editWorkout) return viewEditWorkout();
-  if (!state.workouts.length) {
-    return `<h1>Historique</h1><div class="empty"><div class="big">📅</div><p>Aucune séance enregistrée pour l'instant.</p></div>`;
-  }
 
   // Calendrier du mois : un point sur chaque jour d'entraînement
   const [y, m] = state.histMonth.split('-').map(Number);
@@ -481,7 +478,57 @@ function viewHistory() {
       </div>
     </section>
     <p class="muted small">${title}</p>
-    ${cards || emptyHistoryMessage()}`;
+    ${cards || emptyHistoryMessage()}
+    ${addPastWorkoutButton()}`;
+}
+
+// Séance oubliée : on peut l'ajouter à la main sur le jour choisi (pas dans le futur)
+function addPastWorkoutButton() {
+  if (!state.histDay) {
+    return '<p class="muted small" style="text-align:center">Tu as oublié d\'enregistrer une séance ? Touche le jour dans le calendrier pour l\'ajouter.</p>';
+  }
+  if (state.histDay > localDay()) return '';
+  return `<button class="btn btn-ghost" data-action="add-past" data-day="${state.histDay}">+ Ajouter une séance ce jour-là</button>`;
+}
+
+// Choix de la séance à ajouter : celles de tes programmes, ou une séance libre
+function openAddPastSheet(day) {
+  const groups = state.programs.map((p) => {
+    const tpls = programTemplates(p.id);
+    if (!tpls.length) return '';
+    return `
+      <h3>${esc(p.name)}</h3>
+      ${tpls.map((t) => `<button class="btn btn-secondary" data-sheet="add-past-pick" data-day="${day}" data-id="${t.id}">${esc(t.name)}</button>`).join('')}`;
+  }).join('');
+  $sheet.querySelector('.sheet-body').innerHTML = `
+    <div class="sheet-head">
+      <div><h2>Ajouter une séance</h2><span class="muted small">${fmtDate(dayToIso(day))}</span></div>
+      <button class="icon-btn" data-sheet="close" aria-label="Fermer">✕</button>
+    </div>
+    <p class="small muted">Quelle séance as-tu faite ce jour-là ?</p>
+    ${groups}
+    <h3>Autre</h3>
+    <button class="btn btn-ghost" data-sheet="add-past-pick" data-day="${day}" data-id="">Séance libre (sans programme)</button>`;
+  $sheet.hidden = false;
+}
+
+function startPastWorkout(day, templateId) {
+  const t = state.templates.find((x) => x.id === templateId);
+  const program = t && state.programs.find((p) => p.id === t.programId);
+  state.editWorkout = {
+    id: uid(),
+    isNew: true,
+    day,
+    date: `${day}T18:00:00`, // heure par défaut : 18 h
+    programName: program ? program.name : null,
+    templateId: t ? t.id : null,
+    templateName: t ? t.name : 'Séance libre',
+    // Pré-rempli avec ta dernière perf sur chaque exercice : il ne reste qu'à corriger
+    exercises: t ? t.exercises.map((name) => ({ name, sets: initialSets(name).map(({ reps, weight }) => ({ reps, weight })) })) : [],
+  };
+  closeSheet();
+  render();
+  scrollTo(0, 0);
 }
 
 // Mois ou jour sans séance : on propose d'aller directement à la séance la plus récente avant
@@ -521,7 +568,7 @@ function viewEditWorkout() {
 
   return `
     <button class="back" data-action="ew-cancel">‹ Annuler</button>
-    <h1>Modifier la séance</h1>
+    <h1>${w.isNew ? 'Ajouter une séance' : 'Modifier la séance'}</h1>
     <section class="card">
       <p class="muted small" style="margin-top:0">${esc(w.templateName)}${w.programName ? ' · ' + esc(w.programName) : ''}</p>
       <label class="field"><span>Date de la séance</span>
@@ -529,28 +576,32 @@ function viewEditWorkout() {
     </section>
     ${exercises || '<p class="muted">Plus aucun exercice dans cette séance.</p>'}
     <button class="btn btn-secondary" data-action="ew-add-ex">+ Ajouter un exercice</button>
-    <button class="btn btn-primary btn-xl" data-action="ew-save">Enregistrer les modifications</button>`;
+    <button class="btn btn-primary btn-xl" data-action="ew-save">${w.isNew ? 'Enregistrer la séance' : 'Enregistrer les modifications'}</button>`;
 }
 
 async function saveEditedWorkout() {
   const w = state.editWorkout;
   const exercises = w.exercises.filter((e) => e.sets.length);
   if (!exercises.length) {
-    return showMessage('Séance vide', 'Il n\'y a plus aucune série. Pour supprimer la séance, utilise « Supprimer » dans l\'historique.');
+    return showMessage('Séance vide', w.isNew
+      ? 'Ajoute au moins un exercice avec une série.'
+      : 'Il n\'y a plus aucune série. Pour supprimer la séance, utilise « Supprimer » dans l\'historique.');
   }
+  if (w.day > localDay()) return showMessage('Date dans le futur', 'Choisis une date d\'aujourd\'hui ou d\'avant.');
   // Nouvelle date : même heure qu'avant, au jour choisi
   const date = new Date(w.date);
   const [y, m, d] = w.day.split('-').map(Number);
   date.setFullYear(y, m - 1, d);
-  const { day, ...saved } = { ...w, exercises, date: date.toISOString() };
+  const { day, isNew, ...saved } = { ...w, exercises, date: date.toISOString() };
   await dbPut('workouts', saved);
-  state.workouts = state.workouts.map((x) => (x.id === saved.id ? saved : x)).sort((a, b) => b.date.localeCompare(a.date));
+  const others = state.workouts.filter((x) => x.id !== saved.id);
+  state.workouts = [...others, saved].sort((a, b) => b.date.localeCompare(a.date));
   state.editWorkout = null;
   state.histDay = day;
   state.histMonth = day.slice(0, 7);
   render();
   scrollTo(0, 0);
-  toast('Séance modifiée ✅');
+  toast(isNew ? 'Séance ajoutée ✅' : 'Séance modifiée ✅');
 }
 
 /* ---------- Progrès ---------- */
@@ -1482,6 +1533,8 @@ $sheet.addEventListener('click', (e) => {
       return renderRestSheet();
     case 'rest-save':
       return saveRestSheet();
+    case 'add-past-pick':
+      return startPastWorkout(btn.dataset.day, btn.dataset.id);
   }
 });
 
@@ -1723,6 +1776,8 @@ $app.addEventListener('click', async (e) => {
       state.histDay = null;
       return render();
     }
+    case 'add-past':
+      return openAddPastSheet(btn.dataset.day);
     case 'hist-goto':
       state.histMonth = btn.dataset.day.slice(0, 7);
       state.histDay = btn.dataset.day;
