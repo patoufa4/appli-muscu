@@ -1353,11 +1353,12 @@ const LIBRARY = EXERCISE_GROUPS.flatMap((g) => g.items.map((item) => {
 const findExercise = (name) => LIBRARY.find((e) => e.nameN === norm(name.trim())) || null;
 
 // Muscles d'un exercice : bibliothèque, ou choisis à la main pour un exercice perso (null si inconnus)
+// Muscles choisis à la main (exercice perso, ou correction d'un exercice de la bibliothèque) en priorité
 function exerciseMuscles(name) {
-  const e = findExercise(name);
-  if (e) return musclesFor(e.group, e.nameN);
   const c = state.custom[norm(name.trim())];
-  return c ? { primary: c.primary, secondary: c.secondary } : null;
+  if (c) return { primary: c.primary, secondary: c.secondary };
+  const e = findExercise(name);
+  return e ? musclesFor(e.group, e.nameN) : null;
 }
 
 function allExercises() {
@@ -1540,7 +1541,10 @@ function openSheet(name) {
     ${map}
     ${noteFor(name) ? `<p class="ex-note static">📝 ${esc(noteFor(name))}</p>` : ''}
     <button class="btn btn-secondary" data-sheet="edit-note" data-name="${esc(name)}">📝 ${noteFor(name) ? 'Modifier la note' : 'Ajouter une note'}</button>
-    ${e ? '' : `<button class="btn btn-secondary" data-sheet="edit-muscles" data-name="${esc(name)}">✏️ ${hasMuscles ? 'Modifier' : 'Choisir'} les muscles</button>`}`;
+    <button class="btn btn-secondary" data-sheet="edit-muscles" data-name="${esc(name)}">✏️ ${hasMuscles ? 'Modifier' : 'Choisir'} les muscles</button>
+    ${e && state.custom[e.nameN] ? `
+      <p class="muted small" style="text-align:center">Muscles modifiés par toi.</p>
+      <button class="btn btn-ghost" data-sheet="reset-muscles" data-name="${esc(name)}">↺ Remettre les muscles d'origine</button>` : ''}`;
   $sheet.hidden = false;
 }
 
@@ -1553,11 +1557,12 @@ function closeSheet() {
 const cx = { name: '', isNew: false, mode: 'primary', primary: [], secondary: [], onSave: null };
 
 function openMuscleEditor(name, isNew, onSave) {
-  const existing = state.custom[norm(name.trim())];
+  // On part des muscles actuels : ceux déjà choisis, sinon ceux de la bibliothèque
+  const current = exerciseMuscles(name) || { primary: [], secondary: [] };
   Object.assign(cx, {
     name: name.trim(), isNew, mode: 'primary', onSave,
-    primary: existing ? [...existing.primary] : [],
-    secondary: existing ? [...existing.secondary] : [],
+    primary: [...current.primary],
+    secondary: [...current.secondary],
   });
   $sheet.querySelector('.sheet-body').innerHTML = `
     <div class="sheet-head">
@@ -1625,7 +1630,19 @@ $sheet.addEventListener('click', async (e) => {
     case 'close':
       return closeSheet();
     case 'edit-muscles':
-      return openMuscleEditor(btn.dataset.name, false, () => render());
+      return openMuscleEditor(btn.dataset.name, false, (name) => {
+        render();
+        openSheet(name); // on revient sur la fiche pour voir le résultat
+      });
+    case 'reset-muscles': {
+      const name = btn.dataset.name;
+      if (!(await askConfirm('Remettre les muscles d\'origine ?', `« ${name} » reprendra les muscles prévus par l'app.`, 'Remettre'))) return;
+      await dbDel('custom', norm(name.trim()));
+      delete state.custom[norm(name.trim())];
+      render();
+      openSheet(name);
+      return toast('Muscles d\'origine remis');
+    }
     case 'cx-mode':
       cx.mode = btn.dataset.mode;
       return renderMuscleEditor();
