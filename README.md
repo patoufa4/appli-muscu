@@ -31,6 +31,13 @@ Tout est stocké **sur le téléphone** (IndexedDB), et l'app marche **sans rés
   *Secondaire* et touche les muscles sur le bonhomme (ou dans la liste). Il est ensuite compté dans
   le Volume. Pour changer ses muscles plus tard : bouton **i** → *Modifier les muscles*.
 
+## Historique
+
+- **Calendrier** du mois (‹ › pour changer de mois) : un point sur chaque jour d'entraînement.
+  Touche un jour pour voir sa séance, retouche-le pour revoir tout le mois.
+- **✏️ Modifier** une séance enregistrée : corriger reps et poids, ajouter / retirer des séries ou des
+  exercices, changer la date. Le Volume, les records et « Dernière fois » se mettent à jour tout seuls.
+
 ## Minuteur de repos
 
 - Quand tu coches ✓ une série, le chrono de repos démarre tout seul (barre en bas de l'écran),
@@ -41,14 +48,22 @@ Tout est stocké **sur le téléphone** (IndexedDB), et l'app marche **sans rés
   ouverte pendant le repos (l'écran reste allumé pendant la séance). Le chrono, lui, continue bien
   de tourner et se retrouve à la réouverture.
 
+## Progrès
+
+- **Global** : ta progression moyenne en % sur la durée de ton choix (cycle, 2 semaines, 1 / 3 / 6 mois,
+  1 an, tout, ou depuis une date), et le
+  détail par muscle (touche un muscle pour voir ses exercices). Calcul : meilleure série de chaque
+  exercice, poids et reps combinés (force estimée) ; au poids du corps, le nombre de reps.
+- **Exercices** : courbe, record et historique d'un exercice.
+
 ## Poids de corps
 
-- Onglet **Progrès → Poids de corps** : une pesée par jour (−/+ 0,1 kg), courbe, variation sur
+- Onglet **Progrès → Pesées** : une pesée par jour (−/+ 0,1 kg), courbe, variation sur
   7 jours et depuis le début. Incluse dans l'export / import.
 
 ## Volume (séries par muscle)
 
-- Onglet **Volume** : nombre de séries par muscle sur la **semaine**, la **semaine passée**,
+- Onglet **Volume** : nombre de séries par muscle sur les **7 derniers jours**, la **semaine passée**,
   le **dernier cycle** (les N dernières séances de ton programme) ou les **30 derniers jours**.
 - **Séries** = le muscle est le principal de l'exercice. **Indirectes** = il travaille en soutien
   (ex : triceps au développé couché). Seules les séries cochées ✓ comptent.
