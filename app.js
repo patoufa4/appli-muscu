@@ -64,13 +64,17 @@ function fmtSets(sets) {
 const $dialog = document.getElementById('dialog');
 
 // input : null = pas de champ texte. Renvoie true/false, ou le texte saisi (null si annulé)
-function openDialog({ title, message = '', input = null, okLabel = 'OK', cancelLabel = 'Annuler', danger = false }) {
+// multiline : grand champ sur plusieurs lignes (Entrée = retour à la ligne)
+function openDialog({ title, message = '', input = null, okLabel = 'OK', cancelLabel = 'Annuler', danger = false, multiline = false, placeholder = '' }) {
   return new Promise((resolve) => {
+    const field_ = multiline
+      ? `<textarea class="dialog-input" rows="4" placeholder="${esc(placeholder)}">${esc(input)}</textarea>`
+      : `<input class="dialog-input" value="${esc(input)}" placeholder="${esc(placeholder)}" autocomplete="off" enterkeyhint="done">`;
     $dialog.innerHTML = `
       <div class="dialog-card" role="dialog" aria-modal="true">
         ${title ? `<h2>${esc(title)}</h2>` : ''}
         ${message ? `<p>${esc(message).replace(/\n/g, '<br>')}</p>` : ''}
-        ${input !== null ? `<input class="dialog-input" value="${esc(input)}" autocomplete="off" enterkeyhint="done">` : ''}
+        ${input !== null ? field_ : ''}
         <div class="dialog-actions ${cancelLabel ? '' : 'single'}">
           ${cancelLabel ? `<button class="btn btn-secondary" data-dlg="cancel">${esc(cancelLabel)}</button>` : ''}
           <button class="btn ${danger ? 'btn-danger-solid' : 'btn-primary'}" data-dlg="ok">${esc(okLabel)}</button>
@@ -91,7 +95,7 @@ function openDialog({ title, message = '', input = null, okLabel = 'OK', cancelL
     };
     if (field) {
       field.focus();
-      field.addEventListener('keydown', (e) => { if (e.key === 'Enter') done(true); });
+      if (!multiline) field.addEventListener('keydown', (e) => { if (e.key === 'Enter') done(true); });
     }
   });
 }
@@ -122,6 +126,7 @@ const state = {
   lastExport: null,
   custom: {},         // exercices perso : clé → { key, name, primary, secondary }
   restTimes: {},      // temps de repos choisi par exercice : clé → secondes
+  notes: {},          // note par exercice (réglage machine…) : clé → texte
   bodyweight: [],     // pesées, de la plus ancienne à la plus récente
   progressView: 'global',
   globalPeriod: 'cycle',   // Progrès → Global : 'cycle', une durée en jours ('14', '90'…), 'all' ou 'custom'
@@ -180,6 +185,7 @@ async function loadAll() {
   state.lastExport = (await dbGet('meta', 'lastExport'))?.value || null;
   state.custom = Object.fromEntries((await dbAll('custom')).map((c) => [c.key, c]));
   state.restTimes = (await dbGet('meta', 'restTimes'))?.value || {};
+  state.notes = (await dbGet('meta', 'notes'))?.value || {};
   state.bodyweight = (await dbAll('bodyweight')).sort((a, b) => a.date.localeCompare(b.date));
 }
 
@@ -407,7 +413,15 @@ function viewWorkout() {
               <span class="last-sets">${last.sets.map((s, j) => `<span>S${j + 1} <b>${esc(fmtSet(s))}</b></span>`).join('')}</span>
             </div>`
           : '<p class="last first">Première fois sur cet exercice 💪</p>'}
-        <button class="rest-btn" data-action="rest-config">⏱ Repos : <strong>${fmtClock(restFor(ex.name))}</strong> <span class="muted">· modifier</span></button>
+        ${ex.replaces ? `
+          <p class="swap-note">⇄ À la place de <strong>${esc(ex.replaces)}</strong>
+            <button class="link" data-action="unswap-ex">Remettre</button></p>` : ''}
+        ${noteFor(ex.name) ? `<button class="ex-note" data-action="edit-note" data-name="${esc(ex.name)}">📝 ${esc(noteFor(ex.name))}</button>` : ''}
+        <div class="ex-tools">
+          <button class="rest-btn" data-action="rest-config">⏱ <strong>${fmtClock(restFor(ex.name))}</strong></button>
+          <button class="rest-btn" data-action="swap-ex">⇄ Remplacer</button>
+          <button class="rest-btn" data-action="edit-note" data-name="${esc(ex.name)}">📝 Note</button>
+        </div>
         ${sets}
         <button class="btn btn-secondary" data-action="add-set">+ Ajouter une série</button>
       </section>`;
@@ -457,7 +471,7 @@ function viewHistory() {
         <h2>${esc(w.templateName)}</h2>
         <span class="muted small">${w.programName ? esc(w.programName) + ' · ' : ''}${fmtDate(w.date)}</span>
       </div>
-      ${w.exercises.map((e) => `<p class="hist-ex"><strong>${esc(e.name)}</strong>${esc(fmtSets(e.sets))}</p>`).join('')}
+      ${w.exercises.map((e) => `<p class="hist-ex"><strong>${esc(e.name)}${e.replaces ? ` <span class="muted small">⇄ à la place de ${esc(e.replaces)}</span>` : ''}</strong>${esc(fmtSets(e.sets))}</p>`).join('')}
       <div class="btn-row" style="margin-top:12px">
         <button class="btn btn-secondary" data-action="edit-workout" data-id="${w.id}">✏️ Modifier</button>
         <button class="btn btn-ghost" data-action="delete-workout" data-id="${w.id}">Supprimer</button>
@@ -1077,7 +1091,11 @@ async function startWorkout(template) {
 async function finishWorkout() {
   const d = state.draft;
   const exercises = d.exercises
-    .map((e) => ({ name: e.name, sets: e.sets.filter((s) => s.done).map((s) => ({ reps: s.reps, weight: s.weight })) }))
+    .map((e) => ({
+      name: e.name,
+      ...(e.replaces ? { replaces: e.replaces } : {}), // exercice remplacé ce jour-là (pour l'historique)
+      sets: e.sets.filter((s) => s.done).map((s) => ({ reps: s.reps, weight: s.weight })),
+    }))
     .filter((e) => e.sets.length);
   const count = exercises.reduce((a, e) => a + e.sets.length, 0);
 
@@ -1125,6 +1143,7 @@ async function exportData() {
     custom: Object.values(state.custom),
     bodyweight: state.bodyweight,
     restTimes: state.restTimes,
+    notes: state.notes,
   };
   const name = `muscu-${new Date().toISOString().slice(0, 10)}.json`;
   const file = new File([JSON.stringify(data, null, 2)], name, { type: 'application/json' });
@@ -1164,6 +1183,7 @@ function isValidBackup(data) {
     && (data.bodyweight === undefined || (Array.isArray(data.bodyweight)
       && data.bodyweight.every((b) => b && /^\d{4}-\d{2}-\d{2}$/.test(b.date) && Number.isFinite(b.weight))))
     && (data.restTimes === undefined || (data.restTimes && typeof data.restTimes === 'object'))
+    && (data.notes === undefined || (data.notes && typeof data.notes === 'object'))
     && (data.custom === undefined || (Array.isArray(data.custom) && data.custom.every((c) => c && typeof c.key === 'string'
       && typeof c.name === 'string' && Array.isArray(c.primary) && Array.isArray(c.secondary))))
     && data.templates.every((t) => t && t.id && typeof t.name === 'string' && Array.isArray(t.exercises))
@@ -1190,6 +1210,7 @@ async function importData(file) {
   (data.custom || []).forEach((c) => tx.objectStore('custom').put(c));
   (data.bodyweight || []).forEach((b) => tx.objectStore('bodyweight').put(b));
   if (data.restTimes) tx.objectStore('meta').put({ key: 'restTimes', value: { ...state.restTimes, ...data.restTimes } });
+  if (data.notes) tx.objectStore('meta').put({ key: 'notes', value: { ...state.notes, ...data.notes } });
   data.templates.forEach((t) => tx.objectStore('templates').put(t));
   data.workouts.forEach((w) => tx.objectStore('workouts').put(w));
   await new Promise((res, rej) => { tx.oncomplete = res; tx.onerror = () => rej(tx.error); });
@@ -1316,12 +1337,16 @@ function searchExercises(query, group) {
     .map((x) => x[1]);
 }
 
-const picker = { query: '', group: '', selected: [], onDone: null };
+const picker = { query: '', group: '', selected: [], onDone: null, single: false };
 const $picker = document.getElementById('picker');
 const $pkSearch = $picker.querySelector('.picker-search');
 
-function openPicker(onDone) {
-  Object.assign(picker, { query: '', group: '', selected: [], onDone });
+// options.single : un seul toucher choisit l'exercice (pour « Remplacer »)
+// options.title / options.group : titre de l'écran et muscle pré-sélectionné
+function openPicker(onDone, options = {}) {
+  Object.assign(picker, { query: '', group: options.group || '', selected: [], onDone, single: !!options.single });
+  $picker.querySelector('.picker-head strong').textContent = options.title || 'Ajouter des exercices';
+  $picker.querySelector('.picker-foot').hidden = picker.single;
   $pkSearch.value = '';
   $picker.hidden = false;
   document.body.style.overflow = 'hidden';
@@ -1382,6 +1407,10 @@ $picker.addEventListener('click', (e) => {
       return;
     case 'toggle': {
       const name = btn.dataset.name;
+      if (picker.single) {
+        closePicker();
+        return picker.onDone([name]);
+      }
       const i = picker.selected.indexOf(name);
       if (i >= 0) picker.selected.splice(i, 1);
       else picker.selected.push(name);
@@ -1389,6 +1418,10 @@ $picker.addEventListener('click', (e) => {
     }
     case 'create':
       return openMuscleEditor(btn.dataset.name, true, (name) => {
+        if (picker.single) {
+          closePicker();
+          return picker.onDone([name]);
+        }
         if (!picker.selected.includes(name)) picker.selected.push(name);
         // On vide la recherche pour pouvoir en chercher un autre
         picker.query = '';
@@ -1412,6 +1445,26 @@ const $sheet = document.getElementById('sheet');
 
 const muscleLabels = (list) => list.map((m) => MUSCLE_LABELS[m]).join(', ');
 
+/* ---------- Note par exercice (réglage de la machine, sensation…) ---------- */
+const noteFor = (name) => state.notes[keyOf(name)] || '';
+
+async function editNote(name) {
+  const text = await openDialog({
+    title: `Note : ${name}`,
+    message: 'Elle s\'affichera sur cet exercice à chaque séance.',
+    input: noteFor(name),
+    multiline: true,
+    placeholder: 'ex : siège cran 4, poignées position 2',
+    okLabel: 'Enregistrer',
+  });
+  if (text === null) return false;
+  if (text) state.notes[keyOf(name)] = text;
+  else delete state.notes[keyOf(name)];
+  await dbPut('meta', { key: 'notes', value: state.notes });
+  toast(text ? 'Note enregistrée 📝' : 'Note supprimée');
+  return true;
+}
+
 function openSheet(name) {
   const e = findExercise(name);
   const muscles = exerciseMuscles(name);
@@ -1432,6 +1485,8 @@ function openSheet(name) {
       <button class="icon-btn" data-sheet="close" aria-label="Fermer">✕</button>
     </div>
     ${map}
+    ${noteFor(name) ? `<p class="ex-note static">📝 ${esc(noteFor(name))}</p>` : ''}
+    <button class="btn btn-secondary" data-sheet="edit-note" data-name="${esc(name)}">📝 ${noteFor(name) ? 'Modifier la note' : 'Ajouter une note'}</button>
     ${e ? '' : `<button class="btn btn-secondary" data-sheet="edit-muscles" data-name="${esc(name)}">✏️ ${hasMuscles ? 'Modifier' : 'Choisir'} les muscles</button>`}`;
   $sheet.hidden = false;
 }
@@ -1506,7 +1561,7 @@ async function saveMuscleEditor() {
   cx.onSave(name);
 }
 
-$sheet.addEventListener('click', (e) => {
+$sheet.addEventListener('click', async (e) => {
   if (e.target === $sheet) return closeSheet();
   // Toucher une zone du bonhomme dans l'éditeur
   const zone = e.target.closest('.cx-maps path[data-m]');
@@ -1533,6 +1588,12 @@ $sheet.addEventListener('click', (e) => {
       return renderRestSheet();
     case 'rest-save':
       return saveRestSheet();
+    case 'edit-note':
+      if (await editNote(btn.dataset.name)) {
+        openSheet(btn.dataset.name);
+        render();
+      }
+      return;
     case 'add-past-pick':
       return startPastWorkout(btn.dataset.day, btn.dataset.id);
   }
@@ -1734,6 +1795,33 @@ $app.addEventListener('click', async (e) => {
       ex.sets.splice(+setEl.dataset.set, 1);
       await saveDraft();
       return render();
+    case 'edit-note':
+      if (await editNote(btn.dataset.name)) render();
+      return;
+    case 'swap-ex': {
+      const i = +exEl.dataset.ex;
+      const original = ex.replaces || ex.name;
+      return openPicker(async ([name]) => {
+        const target = state.draft.exercises[i];
+        if (target.sets.some((s) => s.done)
+          && !(await askConfirm('Remplacer l\'exercice ?', `Tes séries déjà cochées sur « ${target.name} » ne seront pas gardées.`, 'Remplacer', true))) return;
+        // Choisir l'exercice d'origine = revenir en arrière
+        const back = keyOf(name) === keyOf(original);
+        state.draft.exercises[i] = { name, sets: initialSets(name), ...(back ? {} : { replaces: original }) };
+        await saveDraft();
+        render();
+        document.querySelector(`.exercise[data-ex="${i}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        toast(back ? `${name} remis` : `${original} → ${name}`);
+      }, { single: true, title: `Remplacer ${original}`, group: (findExercise(original) || {}).group });
+    }
+    case 'unswap-ex': {
+      if (ex.sets.some((s) => s.done)
+        && !(await askConfirm(`Remettre ${ex.replaces} ?`, `Tes séries déjà cochées sur « ${ex.name} » ne seront pas gardées.`, 'Remettre', true))) return;
+      const i = +exEl.dataset.ex;
+      state.draft.exercises[i] = { name: ex.replaces, sets: initialSets(ex.replaces) };
+      await saveDraft();
+      return render();
+    }
     case 'move-ex': {
       const list = state.draft.exercises, i = +exEl.dataset.ex, j = i + +btn.dataset.dir;
       if (j < 0 || j >= list.length) return;
