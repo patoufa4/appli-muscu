@@ -356,6 +356,29 @@ body.resting { padding-bottom: calc(var(--safe-bottom) + 220px); }
 .picker-foot .btn { margin: 0; }
 .picker-foot .btn:disabled { opacity: 0.4; }
 
+/* ---------- Fenêtres de dialogue ---------- */
+#dialog {
+  position: fixed; inset: 0; z-index: 50; background: rgba(0, 0, 0, 0.6);
+  display: flex; align-items: center; justify-content: center; padding: 20px;
+}
+#dialog[hidden] { display: none; }
+.dialog-card {
+  width: 100%; max-width: 400px; background: var(--surface); border: 1px solid var(--border);
+  border-radius: 20px; padding: 20px 16px 16px; animation: dialog-in 0.18s ease-out;
+}
+@keyframes dialog-in { from { transform: scale(0.94); opacity: 0; } }
+.dialog-card h2 { font-size: 20px; margin-bottom: 6px; }
+.dialog-card p { color: var(--muted); font-size: 16px; margin: 6px 0 4px; }
+.dialog-input {
+  width: 100%; margin-top: 10px; padding: 14px; font-size: 18px;
+  background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 12px;
+}
+.dialog-input:focus { outline: none; border-color: var(--accent); }
+.dialog-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 16px; }
+.dialog-actions.single { grid-template-columns: 1fr; }
+.dialog-actions .btn { margin: 0; min-height: 52px; }
+.btn-danger-solid { background: var(--danger); color: #fff; }
+
 /* ---------- Notification ---------- */
 #toast {
   position: fixed; left: 50%; bottom: calc(var(--safe-bottom) + 80px); z-index: 20;
