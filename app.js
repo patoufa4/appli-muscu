@@ -4,7 +4,7 @@
    Base de données locale (IndexedDB) — tout reste sur le téléphone
    ===================================================================== */
 const DB_NAME = 'muscu';
-const DB_VERSION = 3;
+const DB_VERSION = 4;
 let db;
 
 function openDB() {
@@ -18,6 +18,8 @@ function openDB() {
       if (!d.objectStoreNames.contains('meta')) d.createObjectStore('meta', { keyPath: 'key' });
       // Exercices perso avec leurs muscles choisis à la main (clé = nom sans accents ni majuscules)
       if (!d.objectStoreNames.contains('custom')) d.createObjectStore('custom', { keyPath: 'key' });
+      // Poids de corps : une pesée par jour (clé = date AAAA-MM-JJ)
+      if (!d.objectStoreNames.contains('bodyweight')) d.createObjectStore('bodyweight', { keyPath: 'date' });
     };
     r.onsuccess = () => resolve(r.result);
     r.onerror = () => reject(r.error);
@@ -80,6 +82,9 @@ const state = {
   activeProgram: null,
   lastExport: null,
   custom: {},         // exercices perso : clé → { key, name, primary, secondary }
+  restTimes: {},      // temps de repos choisi par exercice : clé → secondes
+  bodyweight: [],     // pesées, de la plus ancienne à la plus récente
+  progressView: 'exercises',
   progressExercise: null,
   progressMetric: 'weight',
   volumePeriod: 'week',
@@ -129,6 +134,8 @@ async function loadAll() {
   state.draft = (await dbGet('meta', 'draft'))?.value || null;
   state.lastExport = (await dbGet('meta', 'lastExport'))?.value || null;
   state.custom = Object.fromEntries((await dbAll('custom')).map((c) => [c.key, c]));
+  state.restTimes = (await dbGet('meta', 'restTimes'))?.value || {};
+  state.bodyweight = (await dbAll('bodyweight')).sort((a, b) => a.date.localeCompare(b.date));
 }
 
 const saveDraft = () => (state.draft ? dbPut('meta', { key: 'draft', value: state.draft }) : dbDel('meta', 'draft'));
@@ -353,6 +360,7 @@ function viewWorkout() {
               <span class="last-sets">${last.sets.map((s, j) => `<span>S${j + 1} <b>${esc(fmtSet(s))}</b></span>`).join('')}</span>
             </div>`
           : '<p class="last first">Première fois sur cet exercice 💪</p>'}
+        <button class="rest-btn" data-action="rest-config">⏱ Repos : <strong>${fmtClock(restFor(ex.name))}</strong> <span class="muted">· modifier</span></button>
         ${sets}
         <button class="btn btn-secondary" data-action="add-set">+ Ajouter une série</button>
       </section>`;
@@ -400,9 +408,76 @@ function exerciseNames() {
 }
 
 function viewProgress() {
+  const seg = [['exercises', 'Exercices'], ['bodyweight', 'Poids de corps']].map(([id, label]) =>
+    `<button class="${id === state.progressView ? 'on' : ''}" data-action="progress-view" data-id="${id}">${label}</button>`).join('');
+  return `
+    <h1>Progrès</h1>
+    <div class="seg two">${seg}</div>
+    ${state.progressView === 'bodyweight' ? viewBodyweight() : viewExerciseProgress()}`;
+}
+
+/* ---------- Poids de corps ---------- */
+const pad2 = (n) => String(n).padStart(2, '0');
+const localDay = (d = new Date()) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+const dayToIso = (day) => `${day}T12:00:00`; // midi : évite les décalages de fuseau horaire
+
+function viewBodyweight() {
+  const list = state.bodyweight;
+  const today = localDay();
+  const todayEntry = list.find((b) => b.date === today);
+  const last = list[list.length - 1];
+  const value = todayEntry ? todayEntry.weight : last ? last.weight : 70;
+
+  // Variation sur 7 jours : par rapport à la dernière pesée d'il y a au moins 7 jours
+  const weekAgo = new Date();
+  weekAgo.setDate(weekAgo.getDate() - 7);
+  const ref7 = [...list].reverse().find((b) => b.date <= localDay(weekAgo));
+  const diff = (a, b) => Math.round((a - b) * 10) / 10;
+  const sign = (n) => (n > 0 ? '+' : '') + fmtNum(n);
+
+  const stats = last ? `
+    <div class="stats">
+      <div class="stat"><div class="stat-value">${fmtNum(last.weight)}<span class="small"> kg</span></div><div class="stat-label">Actuel</div></div>
+      <div class="stat"><div class="stat-value">${ref7 ? sign(diff(last.weight, ref7.weight)) : '–'}</div><div class="stat-label">Sur 7 jours</div></div>
+      <div class="stat"><div class="stat-value">${list.length > 1 ? sign(diff(last.weight, list[0].weight)) : '–'}</div><div class="stat-label">Depuis le début</div></div>
+    </div>` : '';
+
+  const points = list.map((b) => ({ date: dayToIso(b.date), y: b.weight }));
+  const rows = [...list].reverse().map((b) => `
+    <div class="row">
+      <span>${fmtDate(dayToIso(b.date))}</span>
+      <span><strong>${fmtNum(b.weight)} kg</strong> <button class="link" data-action="bw-delete" data-date="${b.date}">suppr.</button></span>
+    </div>`).join('');
+
+  return `
+    <section class="card">
+      <span class="stepper-label">Poids du jour (${fmtDate(dayToIso(today))})</span>
+      <div class="stepper-row bw-stepper">
+        <button data-action="bw-step" data-delta="-0.1" aria-label="Moins 100 g">−</button>
+        <input id="bw-input" inputmode="decimal" value="${fmtNum(value)}" autocomplete="off" aria-label="Poids en kg">
+        <button data-action="bw-step" data-delta="0.1" aria-label="Plus 100 g">+</button>
+      </div>
+      <button class="btn btn-primary" data-action="bw-save">${todayEntry ? 'Mettre à jour la pesée du jour' : 'Enregistrer ma pesée'}</button>
+    </section>
+    ${stats}
+    ${points.length > 1 ? `<section class="card">${chartSVG(points)}</section>` : list.length ? '<p class="muted small">Pèse-toi un autre jour pour voir la courbe.</p>' : ''}
+    ${list.length ? `<h3>Toutes les pesées</h3><section class="card">${rows}</section>` : '<p class="muted small">Astuce : pèse-toi le matin à jeun, toujours dans les mêmes conditions.</p>'}`;
+}
+
+async function saveBodyweight() {
+  const weight = num(document.getElementById('bw-input').value);
+  if (weight < 20 || weight > 400) return alert('Entre un poids valide (en kg).');
+  const entry = { date: localDay(), weight };
+  await dbPut('bodyweight', entry);
+  state.bodyweight = [...state.bodyweight.filter((b) => b.date !== entry.date), entry].sort((a, b) => a.date.localeCompare(b.date));
+  render();
+  toast(`Pesée enregistrée : ${fmtNum(weight)} kg`);
+}
+
+function viewExerciseProgress() {
   const names = exerciseNames();
   if (!names.length) {
-    return `<h1>Progrès</h1><div class="empty"><div class="big">📈</div><p>Termine ta première séance pour voir ta progression ici.</p></div>`;
+    return `<div class="empty"><div class="big">📈</div><p>Termine ta première séance pour voir ta progression ici.</p></div>`;
   }
   if (!state.progressExercise || !names.some((n) => keyOf(n) === keyOf(state.progressExercise))) {
     state.progressExercise = names[0];
@@ -427,7 +502,6 @@ function viewProgress() {
     `<div class="row"><span>${fmtDate(e.date)}</span><span>${esc(fmtSets(e.ex.sets))}</span></div>`).join('');
 
   return `
-    <h1>Progrès</h1>
     <select class="select" data-action="pick-exercise" aria-label="Exercice">${options}</select>
     <div class="seg">${seg}</div>
     <div class="stats">
@@ -454,10 +528,12 @@ function chartSVG(points) {
   const x = (i) => pl + (i * (W - pl - pr)) / (points.length - 1);
   const y = (v) => pt + (H - pt - pb) * (1 - (v - min) / (max - min));
 
+  // Petits écarts (ex : poids de corps) : graduations avec une décimale
+  const tick = (v) => (max - min < 5 ? Math.round(v * 10) / 10 : Math.round(v));
   const grid = [0, 0.5, 1].map((t) => {
     const v = min + (max - min) * t;
     return `<line class="grid" x1="${pl}" x2="${W - pr}" y1="${y(v)}" y2="${y(v)}"/>
-            <text class="axis" x="${pl - 6}" y="${y(v) + 4}" text-anchor="end">${fmtNum(Math.round(v))}</text>`;
+            <text class="axis" x="${pl - 6}" y="${y(v) + 4}" text-anchor="end">${fmtNum(tick(v))}</text>`;
   }).join('');
 
   const line = points.map((p, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)},${y(p.y).toFixed(1)}`).join(' ');
@@ -465,7 +541,7 @@ function chartSVG(points) {
   const showValues = points.length <= 12;
   const dots = points.map((p, i) => `
     <circle class="dot" cx="${x(i)}" cy="${y(p.y)}" r="4"/>
-    ${showValues || i === points.length - 1 ? `<text class="val" x="${x(i)}" y="${y(p.y) - 9}" text-anchor="middle">${fmtNum(p.y)}</text>` : ''}`).join('');
+    ${showValues || i === points.length - 1 ? `<text class="val" x="${x(i)}" y="${y(p.y) - 9}" text-anchor="${i === 0 ? 'start' : i === points.length - 1 ? 'end' : 'middle'}">${fmtNum(p.y)}</text>` : ''}`).join('');
 
   const last = points.length - 1;
   const xLabels = `
@@ -645,6 +721,7 @@ async function finishWorkout() {
   };
   await dbPut('workouts', workout);
   state.workouts.unshift(workout);
+  hideRest();
   state.draft = null;
   await saveDraft();
   render();
@@ -653,6 +730,7 @@ async function finishWorkout() {
 }
 
 async function discardWorkout() {
+  hideRest();
   state.draft = null;
   await saveDraft();
   render();
@@ -668,6 +746,8 @@ async function exportData() {
     templates: state.templates,
     workouts: state.workouts,
     custom: Object.values(state.custom),
+    bodyweight: state.bodyweight,
+    restTimes: state.restTimes,
   };
   const name = `muscu-${new Date().toISOString().slice(0, 10)}.json`;
   const file = new File([JSON.stringify(data, null, 2)], name, { type: 'application/json' });
@@ -704,6 +784,9 @@ function isValidBackup(data) {
   const okEx = (e) => e && typeof e.name === 'string' && Array.isArray(e.sets) && e.sets.every(okSet);
   return data && Array.isArray(data.templates) && Array.isArray(data.workouts)
     && (data.programs === undefined || (Array.isArray(data.programs) && data.programs.every((p) => p && p.id && typeof p.name === 'string')))
+    && (data.bodyweight === undefined || (Array.isArray(data.bodyweight)
+      && data.bodyweight.every((b) => b && /^\d{4}-\d{2}-\d{2}$/.test(b.date) && Number.isFinite(b.weight))))
+    && (data.restTimes === undefined || (data.restTimes && typeof data.restTimes === 'object'))
     && (data.custom === undefined || (Array.isArray(data.custom) && data.custom.every((c) => c && typeof c.key === 'string'
       && typeof c.name === 'string' && Array.isArray(c.primary) && Array.isArray(c.secondary))))
     && data.templates.every((t) => t && t.id && typeof t.name === 'string' && Array.isArray(t.exercises))
@@ -727,9 +810,11 @@ async function importData(file) {
     + 'Les données sont fusionnées : rien n\'est supprimé, les éléments déjà présents sont mis à jour.';
   if (!confirm(msg)) return;
 
-  const tx = db.transaction(['programs', 'templates', 'workouts', 'custom'], 'readwrite');
+  const tx = db.transaction(['programs', 'templates', 'workouts', 'custom', 'bodyweight', 'meta'], 'readwrite');
   programs.forEach((p) => tx.objectStore('programs').put(p));
   (data.custom || []).forEach((c) => tx.objectStore('custom').put(c));
+  (data.bodyweight || []).forEach((b) => tx.objectStore('bodyweight').put(b));
+  if (data.restTimes) tx.objectStore('meta').put({ key: 'restTimes', value: { ...state.restTimes, ...data.restTimes } });
   data.templates.forEach((t) => tx.objectStore('templates').put(t));
   data.workouts.forEach((w) => tx.objectStore('workouts').put(w));
   await new Promise((res, rej) => { tx.oncomplete = res; tx.onerror = () => rej(tx.error); });
@@ -1065,8 +1150,152 @@ $sheet.addEventListener('click', (e) => {
       return toggleMuscle(btn.dataset.m);
     case 'cx-save':
       return saveMuscleEditor();
+    case 'rest-step':
+      restEdit.value = Math.min(600, Math.max(15, restEdit.value + +btn.dataset.delta));
+      return renderRestSheet();
+    case 'rest-preset':
+      restEdit.value = +btn.dataset.s;
+      return renderRestSheet();
+    case 'rest-save':
+      return saveRestSheet();
   }
 });
+
+/* =====================================================================
+   Minuteur de repos : démarre tout seul quand on coche une série
+   ===================================================================== */
+const DEFAULT_REST = 120; // secondes, si rien n'est réglé pour l'exercice
+const REST_PRESETS = [30, 45, 60, 90, 120, 150, 180, 240, 300];
+const restFor = (name) => state.restTimes[keyOf(name)] ?? DEFAULT_REST;
+const fmtClock = (s) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+const $rest = document.getElementById('rest');
+let restTick = null;
+let audioCtx = null;
+
+// Sur iPhone, le son doit être « débloqué » pendant un toucher : on le fait quand on coche la série
+function unlockAudio() {
+  try {
+    audioCtx ||= new (window.AudioContext || window.webkitAudioContext)();
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+  } catch { /* pas de son, tant pis */ }
+}
+
+function beep() {
+  if (navigator.vibrate) navigator.vibrate([200, 100, 200]);
+  if (!audioCtx) return;
+  const t = audioCtx.currentTime;
+  [[0, 880], [0.25, 880], [0.5, 1320]].forEach(([delay, freq]) => {
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.frequency.value = freq;
+    gain.gain.setValueAtTime(0.0001, t + delay);
+    gain.gain.exponentialRampToValueAtTime(0.5, t + delay + 0.02);
+    gain.gain.exponentialRampToValueAtTime(0.0001, t + delay + 0.2);
+    osc.connect(gain).connect(audioCtx.destination);
+    osc.start(t + delay);
+    osc.stop(t + delay + 0.22);
+  });
+}
+
+function startRest(exName) {
+  const total = restFor(exName);
+  state.draft.rest = { exName, total, endAt: Date.now() + total * 1000 };
+  saveDraft();
+  runRest();
+}
+
+function runRest() {
+  clearInterval(restTick);
+  if (!state.draft || !state.draft.rest) return hideRest();
+  $rest.hidden = false;
+  $rest.classList.remove('done');
+  document.body.classList.add('resting');
+  updateRest();
+  restTick = setInterval(updateRest, 250);
+}
+
+function updateRest() {
+  const r = state.draft && state.draft.rest;
+  if (!r) return hideRest();
+  const left = Math.max(0, Math.ceil((r.endAt - Date.now()) / 1000));
+  if (left === 0) return finishRest(Date.now() - r.endAt < 5000);
+  $rest.querySelector('.rest-label').textContent = `Repos · ${r.exName}`;
+  $rest.querySelector('.rest-time').textContent = fmtClock(left);
+  $rest.querySelector('.rest-fill').style.width = `${Math.min(100, (1 - left / r.total) * 100)}%`;
+}
+
+// withSound = false si le repos s'est terminé pendant que l'app était fermée
+function finishRest(withSound) {
+  clearInterval(restTick);
+  delete state.draft.rest;
+  saveDraft();
+  if (withSound) beep();
+  $rest.classList.add('done');
+  $rest.querySelector('.rest-label').textContent = 'Repos terminé';
+  $rest.querySelector('.rest-time').textContent = 'C\'est reparti ! 💪';
+  $rest.querySelector('.rest-fill').style.width = '100%';
+  setTimeout(() => { if (!state.draft || !state.draft.rest) hideRest(); }, 4000);
+}
+
+function hideRest() {
+  clearInterval(restTick);
+  $rest.hidden = true;
+  document.body.classList.remove('resting');
+}
+
+function stopRest() {
+  if (state.draft && state.draft.rest) { delete state.draft.rest; saveDraft(); }
+  hideRest();
+}
+
+$rest.addEventListener('click', (e) => {
+  const btn = e.target.closest('[data-rest]');
+  const r = state.draft && state.draft.rest;
+  if (!btn || !r) return hideRest();
+  if (btn.dataset.rest === 'skip') return stopRest();
+  const delta = btn.dataset.rest === 'plus' ? 15 : -15;
+  r.endAt = Math.max(Date.now() + 1000, r.endAt + delta * 1000);
+  r.total = Math.max(r.total + delta, 1);
+  saveDraft();
+  updateRest();
+});
+
+/* ---------- Réglage du temps de repos d'un exercice ---------- */
+const restEdit = { name: '', value: DEFAULT_REST };
+
+function openRestSheet(name) {
+  Object.assign(restEdit, { name, value: restFor(name) });
+  $sheet.querySelector('.sheet-body').innerHTML = `
+    <div class="sheet-head">
+      <div><h2>Temps de repos</h2><span class="muted small">${esc(name)}</span></div>
+      <button class="icon-btn" data-sheet="close" aria-label="Fermer">✕</button>
+    </div>
+    <p class="small muted">Le chrono démarre tout seul quand tu coches ✓ une série de cet exercice. Ce réglage est gardé pour les prochaines séances.</p>
+    <div class="rest-picker">
+      <button class="icon-btn big" data-sheet="rest-step" data-delta="-15" aria-label="Moins 15 secondes">−</button>
+      <span class="rest-value"></span>
+      <button class="icon-btn big" data-sheet="rest-step" data-delta="15" aria-label="Plus 15 secondes">+</button>
+    </div>
+    <div class="chips-wrap rest-presets"></div>
+    <button class="btn btn-primary" data-sheet="rest-save">Enregistrer</button>`;
+  renderRestSheet();
+  $sheet.hidden = false;
+}
+
+function renderRestSheet() {
+  const body = $sheet.querySelector('.sheet-body');
+  body.querySelector('.rest-value').textContent = fmtClock(restEdit.value);
+  body.querySelector('.rest-presets').innerHTML = REST_PRESETS.map((s) =>
+    `<button class="chip ${s === restEdit.value ? 'on' : ''}" data-sheet="rest-preset" data-s="${s}">${fmtClock(s)}</button>`).join('');
+}
+
+async function saveRestSheet() {
+  state.restTimes[keyOf(restEdit.name)] = restEdit.value;
+  await dbPut('meta', { key: 'restTimes', value: state.restTimes });
+  closeSheet();
+  render();
+  toast(`Repos : ${fmtClock(restEdit.value)}`);
+}
 
 // Évite que l'écran se mette en veille pendant la séance (si l'iPhone le permet)
 let wakeLock = null;
@@ -1105,7 +1334,13 @@ $app.addEventListener('click', async (e) => {
     case 'toggle-done':
       set.done = !set.done;
       setEl.classList.toggle('done', set.done);
+      if (set.done) {
+        unlockAudio();
+        return startRest(ex.name); // enregistre aussi la séance en cours
+      }
       return saveDraft();
+    case 'rest-config':
+      return openRestSheet(ex.name);
     case 'add-set': {
       const prev = ex.sets[ex.sets.length - 1] || { reps: 10, weight: 0 };
       ex.sets.push({ reps: prev.reps, weight: prev.weight, done: false });
@@ -1150,6 +1385,21 @@ $app.addEventListener('click', async (e) => {
 
     case 'metric':
       state.progressMetric = btn.dataset.id;
+      return render();
+    case 'progress-view':
+      state.progressView = btn.dataset.id;
+      return render();
+    case 'bw-step': {
+      const input = document.getElementById('bw-input');
+      input.value = fmtNum(Math.max(0, Math.round((num(input.value) + +btn.dataset.delta) * 10) / 10));
+      return;
+    }
+    case 'bw-save':
+      return saveBodyweight();
+    case 'bw-delete':
+      if (!confirm('Supprimer cette pesée ?')) return;
+      await dbDel('bodyweight', btn.dataset.date);
+      state.bodyweight = state.bodyweight.filter((b) => b.date !== btn.dataset.date);
       return render();
     case 'vol-period':
       state.volumePeriod = btn.dataset.id;
@@ -1273,6 +1523,7 @@ document.querySelector('.tabbar').addEventListener('click', (e) => {
     await loadAll();
     render();
     keepScreenOn();
+    runRest(); // reprend le chrono si un repos était en cours
     if (navigator.storage && navigator.storage.persist) navigator.storage.persist();
   } catch (err) {
     $app.innerHTML = `<h1>Oups</h1><p>Impossible d'ouvrir la base de données : ${esc(err.message || err)}</p>`;
