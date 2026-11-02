@@ -40,6 +40,14 @@ Tout est stocké **sur le téléphone** (IndexedDB), et l'app marche **sans rés
 - **Séance oubliée** : touche le jour dans le calendrier → *+ Ajouter une séance ce jour-là* → choisis
   la séance (ou une séance libre) et remplis les séries à la main.
 
+## Pendant la séance
+
+- Bandeau en haut : progression (séries cochées / total) et bouton **Terminer** toujours visible.
+- La prochaine série à faire est encadrée en orange. Un exercice terminé se replie tout seul et
+  l'écran passe au suivant (« Modifier › » pour le rouvrir).
+- Avant de terminer, l'app prévient s'il reste des séries pas cochées (elles ne seraient pas enregistrées).
+- Pas de chrono après la toute dernière série.
+
 ## Remplacer un exercice
 
 - Pendant la séance, bouton **⇄ Remplacer** sur chaque exercice (machine prise…) : choisis l'alternative
