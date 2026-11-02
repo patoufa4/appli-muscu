@@ -60,6 +60,45 @@ function fmtSets(sets) {
   return sets.map(fmtSet).join(' · ');
 }
 
+/* ---------- Fenêtres de dialogue dans le style de l'app (à la place de prompt / confirm / alert) ---------- */
+const $dialog = document.getElementById('dialog');
+
+// input : null = pas de champ texte. Renvoie true/false, ou le texte saisi (null si annulé)
+function openDialog({ title, message = '', input = null, okLabel = 'OK', cancelLabel = 'Annuler', danger = false }) {
+  return new Promise((resolve) => {
+    $dialog.innerHTML = `
+      <div class="dialog-card" role="dialog" aria-modal="true">
+        ${title ? `<h2>${esc(title)}</h2>` : ''}
+        ${message ? `<p>${esc(message).replace(/\n/g, '<br>')}</p>` : ''}
+        ${input !== null ? `<input class="dialog-input" value="${esc(input)}" autocomplete="off" enterkeyhint="done">` : ''}
+        <div class="dialog-actions ${cancelLabel ? '' : 'single'}">
+          ${cancelLabel ? `<button class="btn btn-secondary" data-dlg="cancel">${esc(cancelLabel)}</button>` : ''}
+          <button class="btn ${danger ? 'btn-danger-solid' : 'btn-primary'}" data-dlg="ok">${esc(okLabel)}</button>
+        </div>
+      </div>`;
+    $dialog.hidden = false;
+    const field = $dialog.querySelector('.dialog-input');
+    const done = (ok) => {
+      const value = field ? field.value.trim() : '';
+      $dialog.hidden = true;
+      $dialog.innerHTML = '';
+      resolve(input !== null ? (ok ? value : null) : ok);
+    };
+    $dialog.onclick = (e) => {
+      const btn = e.target.closest('[data-dlg]');
+      if (btn) done(btn.dataset.dlg === 'ok');
+      else if (e.target === $dialog && cancelLabel) done(false);
+    };
+    if (field) {
+      field.focus();
+      field.addEventListener('keydown', (e) => { if (e.key === 'Enter') done(true); });
+    }
+  });
+}
+const askText = (title, value = '', okLabel = 'Valider') => openDialog({ title, input: value, okLabel });
+const askConfirm = (title, message, okLabel = 'Confirmer', danger = false) => openDialog({ title, message, okLabel, danger });
+const showMessage = (title, message) => openDialog({ title, message, cancelLabel: '' });
+
 let toastTimer;
 function toast(msg) {
   const t = document.getElementById('toast');
@@ -466,7 +505,7 @@ function viewBodyweight() {
 
 async function saveBodyweight() {
   const weight = num(document.getElementById('bw-input').value);
-  if (weight < 20 || weight > 400) return alert('Entre un poids valide (en kg).');
+  if (weight < 20 || weight > 400) return showMessage('Poids invalide', 'Entre un poids valide, en kg.');
   const entry = { date: localDay(), weight };
   await dbPut('bodyweight', entry);
   state.bodyweight = [...state.bodyweight.filter((b) => b.date !== entry.date), entry].sort((a, b) => a.date.localeCompare(b.date));
@@ -705,10 +744,10 @@ async function finishWorkout() {
   const count = exercises.reduce((a, e) => a + e.sets.length, 0);
 
   if (!count) {
-    if (confirm('Aucune série cochée ✓.\n\nAbandonner la séance sans rien enregistrer ?')) await discardWorkout();
+    if (await askConfirm('Aucune série cochée ✓', 'Abandonner la séance sans rien enregistrer ?', 'Abandonner', true)) await discardWorkout();
     return;
   }
-  if (!confirm(`Terminer la séance ?\n\n${count} série(s) cochée(s) seront enregistrées.`)) return;
+  if (!(await askConfirm('Terminer la séance ?', `${count} série(s) cochée(s) seront enregistrées.`, 'Terminer'))) return;
 
   const workout = {
     id: uid(),
@@ -798,17 +837,15 @@ async function importData(file) {
   try {
     data = JSON.parse(await file.text());
   } catch {
-    alert("Ce fichier n'est pas un JSON valide.");
-    return;
+    return showMessage('Import impossible', 'Ce fichier n\'est pas un JSON valide.');
   }
   if (!isValidBackup(data)) {
-    alert("Ce fichier ne ressemble pas à une sauvegarde de l'app Muscu.");
-    return;
+    return showMessage('Import impossible', 'Ce fichier ne ressemble pas à une sauvegarde de l\'app Muscu.');
   }
   const programs = data.programs || [];
-  const msg = `Importer cette sauvegarde ?\n\n${data.workouts.length} séance(s) faite(s), ${programs.length} programme(s).\n\n`
+  const msg = `${data.workouts.length} séance(s) faite(s), ${programs.length} programme(s).\n\n`
     + 'Les données sont fusionnées : rien n\'est supprimé, les éléments déjà présents sont mis à jour.';
-  if (!confirm(msg)) return;
+  if (!(await askConfirm('Importer cette sauvegarde ?', msg, 'Importer'))) return;
 
   const tx = db.transaction(['programs', 'templates', 'workouts', 'custom', 'bodyweight', 'meta'], 'readwrite');
   programs.forEach((p) => tx.objectStore('programs').put(p));
@@ -832,7 +869,7 @@ function go(route) {
 }
 
 async function createProgram() {
-  const name = (prompt('Nom du programme :') || '').trim();
+  const name = (await askText('Nom du programme', '', 'Créer') || '').trim();
   if (!name) return;
   const program = { id: uid(), name, createdAt: new Date().toISOString() };
   await dbPut('programs', program);
@@ -853,7 +890,7 @@ async function renameProgram(id, value) {
 
 async function deleteProgram(id) {
   const p = state.programs.find((x) => x.id === id);
-  if (!confirm(`Supprimer le programme « ${p.name} » et ses séances ?\n\nTon historique et tes courbes sont conservés.`)) return;
+  if (!(await askConfirm('Supprimer le programme ?', `« ${p.name} » et ses séances seront supprimés.\nTon historique et tes courbes sont conservés.`, 'Supprimer', true))) return;
   for (const t of programTemplates(id)) await dbDel('templates', t.id);
   await dbDel('programs', id);
   state.templates = state.templates.filter((t) => t.programId !== id);
@@ -866,8 +903,8 @@ async function saveTemplate() {
   const r = state.route;
   const name = r.tplName.trim();
   const exercises = r.exercises;
-  if (!name) return alert('Donne un nom à la séance.');
-  if (!exercises.length) return alert('Ajoute au moins un exercice.');
+  if (!name) return showMessage('Il manque le nom', 'Donne un nom à la séance.');
+  if (!exercises.length) return showMessage('Aucun exercice', 'Ajoute au moins un exercice à la séance.');
 
   const existing = state.templates.find((t) => t.id === r.id);
   const fresh = { id: uid(), programId: r.programId, order: programTemplates(r.programId).length, createdAt: new Date().toISOString() };
@@ -1115,14 +1152,14 @@ function toggleMuscle(m) {
 async function saveMuscleEditor() {
   const input = document.getElementById('cx-name');
   const name = (input ? input.value : cx.name).trim();
-  if (!name) return alert('Donne un nom à l\'exercice.');
+  if (!name) return showMessage('Il manque le nom', 'Donne un nom à l\'exercice.');
   if (cx.isNew && findExercise(name)) {
     // Il existe déjà dans la bibliothèque : on le prend tel quel
     closeSheet();
     return cx.onSave(findExercise(name).name);
   }
   if (!cx.primary.length && !cx.secondary.length
-    && !confirm('Aucun muscle choisi : cet exercice ne sera pas compté dans le Volume.\n\nContinuer quand même ?')) return;
+    && !(await askConfirm('Aucun muscle choisi', 'Cet exercice ne sera pas compté dans le Volume. Continuer quand même ?', 'Continuer'))) return;
   const rec = { key: norm(name), name, primary: cx.primary, secondary: cx.secondary, createdAt: new Date().toISOString() };
   await dbPut('custom', rec);
   state.custom[rec.key] = rec;
@@ -1360,7 +1397,7 @@ $app.addEventListener('click', async (e) => {
       return document.querySelector(`.exercise[data-ex="${j}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     }
     case 'remove-ex':
-      if (!confirm(`Retirer « ${ex.name} » de cette séance ?`)) return;
+      if (!(await askConfirm('Retirer l\'exercice ?', `« ${ex.name} » sera retiré de la séance du jour.`, 'Retirer', true))) return;
       state.draft.exercises.splice(+exEl.dataset.ex, 1);
       await saveDraft();
       return render();
@@ -1374,11 +1411,11 @@ $app.addEventListener('click', async (e) => {
     case 'finish':
       return finishWorkout();
     case 'cancel':
-      if (confirm('Abandonner la séance en cours ?\n\nRien ne sera enregistré.')) return discardWorkout();
+      if (await askConfirm('Abandonner la séance ?', 'Rien ne sera enregistré.', 'Abandonner', true)) return discardWorkout();
       return;
 
     case 'delete-workout':
-      if (!confirm('Supprimer définitivement cette séance de l\'historique ?')) return;
+      if (!(await askConfirm('Supprimer cette séance ?', 'Elle sera supprimée définitivement de l\'historique.', 'Supprimer', true))) return;
       await dbDel('workouts', btn.dataset.id);
       state.workouts = state.workouts.filter((w) => w.id !== btn.dataset.id);
       return render();
@@ -1397,7 +1434,7 @@ $app.addEventListener('click', async (e) => {
     case 'bw-save':
       return saveBodyweight();
     case 'bw-delete':
-      if (!confirm('Supprimer cette pesée ?')) return;
+      if (!(await askConfirm('Supprimer cette pesée ?', '', 'Supprimer', true))) return;
       await dbDel('bodyweight', btn.dataset.date);
       state.bodyweight = state.bodyweight.filter((b) => b.date !== btn.dataset.date);
       return render();
@@ -1445,7 +1482,7 @@ $app.addEventListener('click', async (e) => {
       return render();
     case 'delete-template': {
       const t = state.templates.find((x) => x.id === btn.dataset.id);
-      if (!confirm(`Supprimer la séance « ${t.name} » ?\n\nTon historique est conservé.`)) return;
+      if (!(await askConfirm('Supprimer la séance ?', `« ${t.name} » sera retirée du programme.\nTon historique est conservé.`, 'Supprimer', true))) return;
       await dbDel('templates', t.id);
       state.templates = state.templates.filter((x) => x.id !== t.id);
       return render();
