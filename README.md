@@ -27,6 +27,9 @@ Tout est stocké **sur le téléphone** (IndexedDB), et l'app marche **sans rés
 - ~280 exercices, à chercher en français ou en anglais (« chest », « curl », « rdl »…).
 - Bouton **i** (dans la recherche, la séance ou l'éditeur) : **fiche** avec la carte du corps
   (muscles principaux en rouge, secondaires en rouge clair).
+- **Exercice introuvable ?** Tape son nom puis *Créer « … »* : choisis le pinceau *Principal* ou
+  *Secondaire* et touche les muscles sur le bonhomme (ou dans la liste). Il est ensuite compté dans
+  le Volume. Pour changer ses muscles plus tard : bouton **i** → *Modifier les muscles*.
 
 ## Volume (séries par muscle)
 
