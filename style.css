@@ -285,6 +285,15 @@ input, textarea, select { font: inherit; }
 .bodymap .ms { fill: #ff8a80; opacity: 0.75; }
 .bodymap .mh { fill: #ff3b30; }
 
+/* ---------- Éditeur de muscles ---------- */
+.seg.two { grid-template-columns: 1fr 1fr; }
+.seg.two button { display: flex; align-items: center; justify-content: center; gap: 8px; }
+.cx-maps path[data-m] { cursor: pointer; }
+.cx-maps .bodymap { max-height: 300px; }
+.chips-wrap { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0; }
+.chip.p { background: #ff3b30; border-color: #ff3b30; color: #fff; }
+.chip.s { background: rgba(255, 138, 128, 0.35); border-color: #ff8a80; color: var(--text); }
+
 /* ---------- Volume ---------- */
 .seg.four { grid-template-columns: repeat(4, 1fr); }
 .seg.four button { font-size: 13px; padding: 0 2px; white-space: nowrap; }
