@@ -380,12 +380,38 @@ function stepper(field, value, label, editing = false) {
     </div>`;
 }
 
+const isComplete = (ex) => ex.sets.length > 0 && ex.sets.every((s) => s.done);
+
+// Prochaine série à faire : la 1re non cochée du 1er exercice pas terminé
+function nextSetPosition(d) {
+  for (const [i, ex] of d.exercises.entries()) {
+    const j = ex.sets.findIndex((s) => !s.done);
+    if (j >= 0) return { i, j };
+  }
+  return null;
+}
+
 function viewWorkout() {
   const d = state.draft;
+  const next = nextSetPosition(d);
+  const total = d.exercises.reduce((a, ex) => a + ex.sets.length, 0);
+  const doneCount = d.exercises.reduce((a, ex) => a + ex.sets.filter((s) => s.done).length, 0);
+
   const exercises = d.exercises.map((ex, i) => {
+    // Exercice terminé : replié sur une ligne (on peut le rouvrir)
+    if (isComplete(ex) && !ex.expanded) {
+      return `
+        <section class="card exercise collapsed" data-ex="${i}">
+          <button class="ex-collapsed" data-action="expand-ex">
+            <span class="ex-done-check">✓</span>
+            <span class="ex-collapsed-text"><strong>${esc(ex.name)}</strong><span class="muted small">${esc(fmtSets(ex.sets))}</span></span>
+            <span class="muted small">Modifier ›</span>
+          </button>
+        </section>`;
+    }
     const last = lastPerf(ex.name);
     const sets = ex.sets.map((s, j) => `
-      <div class="set ${s.done ? 'done' : ''}" data-set="${j}">
+      <div class="set ${s.done ? 'done' : ''} ${next && next.i === i && next.j === j ? 'current' : ''}" data-set="${j}">
         <div class="set-top">
           <span class="set-num">Série ${j + 1}${last && last.sets[j] ? `<span class="set-prev">Dernière fois : ${esc(fmtSet(last.sets[j]))}</span>` : ''}</span>
           ${ex.sets.length > 1 ? '<button class="link" data-action="remove-set">Retirer</button>' : ''}
@@ -424,12 +450,20 @@ function viewWorkout() {
         </div>
         ${sets}
         <button class="btn btn-secondary" data-action="add-set">+ Ajouter une série</button>
+        ${isComplete(ex) ? '<button class="link" data-action="collapse-ex">Replier ▴</button>' : ''}
       </section>`;
   }).join('');
 
   return `
-    <h1>${esc(d.templateName)}</h1>
-    <p class="muted small">Commencée à ${fmtTime(d.startedAt)} · coche ✓ chaque série terminée</p>
+    <div class="wk-head">
+      <div class="wk-title">
+        <strong>${esc(d.templateName)}</strong>
+        <span class="muted small">${doneCount}/${total} séries · depuis ${fmtTime(d.startedAt)}</span>
+        <div class="wk-progress"><span style="width:${total ? (doneCount / total) * 100 : 0}%"></span></div>
+      </div>
+      <button class="btn btn-primary wk-finish" data-action="finish">Terminer</button>
+    </div>
+    <p class="muted small">Coche ✓ chaque série terminée : la série à faire est encadrée en orange.</p>
     ${exercises}
     <button class="btn btn-secondary" data-action="add-ex">+ Ajouter un exercice</button>
     <button class="btn btn-primary btn-xl" data-action="finish">Terminer et enregistrer</button>
@@ -1103,7 +1137,25 @@ async function finishWorkout() {
     if (await askConfirm('Aucune série cochée ✓', 'Abandonner la séance sans rien enregistrer ?', 'Abandonner', true)) await discardWorkout();
     return;
   }
-  if (!(await askConfirm('Terminer la séance ?', `${count} série(s) cochée(s) seront enregistrées.`, 'Terminer'))) return;
+  // Séries pas cochées : on prévient avant, pour ne rien perdre par oubli
+  const pending = d.exercises
+    .map((e) => ({ name: e.name, n: e.sets.filter((s) => !s.done).length }))
+    .filter((e) => e.n);
+  if (pending.length) {
+    const nPending = pending.reduce((a, e) => a + e.n, 0);
+    const list = pending.map((e) => `• ${e.name} : ${e.n} série${e.n > 1 ? 's' : ''}`).join('\n');
+    const ok = await openDialog({
+      title: `${nPending} série${nPending > 1 ? 's' : ''} pas cochée${nPending > 1 ? 's' : ''}`,
+      message: `Elles ne seront pas enregistrées :\n${list}\n\nSi tu les as faites, reviens les cocher ✓.`,
+      okLabel: 'Terminer quand même',
+      cancelLabel: 'Revenir',
+    });
+    if (!ok) {
+      const p = nextSetPosition(d);
+      if (p) document.querySelector(`.exercise[data-ex="${p.i}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      return;
+    }
+  } else if (!(await askConfirm('Terminer la séance ?', `${count} série(s) seront enregistrées. Bravo 💪`, 'Terminer'))) return;
 
   const workout = {
     id: uid(),
@@ -1351,7 +1403,8 @@ function openPicker(onDone, options = {}) {
   $picker.hidden = false;
   document.body.style.overflow = 'hidden';
   renderPicker();
-  $pkSearch.focus();
+  // Pas de clavier automatique : il cacherait la liste. Il s'ouvre si on touche la barre de recherche.
+  $picker.querySelector('.picker-list').scrollTop = 0;
 }
 
 function closePicker() {
@@ -1775,14 +1828,35 @@ $app.addEventListener('click', async (e) => {
       setValue(exEl, +setEl.dataset.set, input.dataset.field, Math.round(v * 100) / 100);
       return saveDraft();
     }
-    case 'toggle-done':
+    case 'toggle-done': {
       set.done = !set.done;
-      setEl.classList.toggle('done', set.done);
+      const i = +exEl.dataset.ex;
+      const justFinished = set.done && isComplete(ex);
+      if (justFinished) ex.expanded = false; // l'exercice terminé se replie
       if (set.done) {
         unlockAudio();
-        return startRest(ex.name); // enregistre aussi la séance en cours
+        // Pas de chrono après la toute dernière série de la séance
+        if (nextSetPosition(state.draft)) startRest(ex.name); else stopRest();
       }
-      return saveDraft();
+      await saveDraft();
+      render();
+      if (justFinished) {
+        // On passe directement à l'exercice suivant qui n'est pas fini
+        const nextEx = state.draft.exercises.findIndex((e, k) => k > i && !isComplete(e));
+        const target = document.querySelector(`.exercise[data-ex="${nextEx >= 0 ? nextEx : i}"]`);
+        if (nextEx >= 0) target?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        else document.querySelector('[data-action=finish]')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
+      return;
+    }
+    case 'expand-ex':
+      ex.expanded = true;
+      await saveDraft();
+      return render();
+    case 'collapse-ex':
+      ex.expanded = false;
+      await saveDraft();
+      return render();
     case 'rest-config':
       return openRestSheet(ex.name);
     case 'add-set': {
