@@ -37,6 +37,8 @@ Tout est stocké **sur le téléphone** (IndexedDB), et l'app marche **sans rés
   Touche un jour pour voir sa séance, retouche-le pour revoir tout le mois.
 - **✏️ Modifier** une séance enregistrée : corriger reps et poids, ajouter / retirer des séries ou des
   exercices, changer la date. Le Volume, les records et « Dernière fois » se mettent à jour tout seuls.
+- **Séance oubliée** : touche le jour dans le calendrier → *+ Ajouter une séance ce jour-là* → choisis
+  la séance (ou une séance libre) et remplis les séries à la main.
 
 ## Minuteur de repos
 
