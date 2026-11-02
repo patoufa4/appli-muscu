@@ -31,6 +31,21 @@ Tout est stocké **sur le téléphone** (IndexedDB), et l'app marche **sans rés
   *Secondaire* et touche les muscles sur le bonhomme (ou dans la liste). Il est ensuite compté dans
   le Volume. Pour changer ses muscles plus tard : bouton **i** → *Modifier les muscles*.
 
+## Minuteur de repos
+
+- Quand tu coches ✓ une série, le chrono de repos démarre tout seul (barre en bas de l'écran),
+  avec −15 s / +15 s / Passer, et un bip à la fin.
+- Le temps se règle **par exercice** (bouton ⏱ sur l'exercice en séance) et il est retenu.
+  Par défaut : 2:00.
+- L'iPhone ne laisse pas une app web sonner quand elle est fermée ou l'écran verrouillé : garde l'app
+  ouverte pendant le repos (l'écran reste allumé pendant la séance). Le chrono, lui, continue bien
+  de tourner et se retrouve à la réouverture.
+
+## Poids de corps
+
+- Onglet **Progrès → Poids de corps** : une pesée par jour (−/+ 0,1 kg), courbe, variation sur
+  7 jours et depuis le début. Incluse dans l'export / import.
+
 ## Volume (séries par muscle)
 
 - Onglet **Volume** : nombre de séries par muscle sur la **semaine**, la **semaine passée**,
