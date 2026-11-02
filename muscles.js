@@ -50,7 +50,7 @@ const BODY_BACK = [
 // attrs(muscle) donne les attributs SVG de chaque zone (classe, opacité…)
 function bodyMapSVG(view, attrs) {
   const shapes = [...BODY_COMMON, ...(view === 'front' ? BODY_FRONT : BODY_BACK)];
-  const half = shapes.map(([m, d]) => `<path ${m ? attrs(m) : 'class="mb"'} d="${d}"/>`).join('');
+  const half = shapes.map(([m, d]) => `<path ${m ? `${attrs(m)} data-m="${m}"` : 'class="mb"'} d="${d}"/>`).join('');
   return `<svg class="bodymap" viewBox="20 0 60 180" role="img" aria-label="${view === 'front' ? 'Devant' : 'Derrière'}">
     <g>${half}</g><g transform="translate(100 0) scale(-1 1)">${half}</g></svg>`;
 }
