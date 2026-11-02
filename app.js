@@ -123,7 +123,13 @@ const state = {
   custom: {},         // exercices perso : clé → { key, name, primary, secondary }
   restTimes: {},      // temps de repos choisi par exercice : clé → secondes
   bodyweight: [],     // pesées, de la plus ancienne à la plus récente
-  progressView: 'exercises',
+  progressView: 'global',
+  globalPeriod: 'cycle',   // Progrès → Global : 'cycle', une durée en jours ('14', '90'…), 'all' ou 'custom'
+  globalFrom: null,        // date de départ choisie à la main (AAAA-MM-JJ) pour 'custom'
+  globalMuscle: null,      // muscle ouvert pour voir le détail de ses exercices
+  histMonth: `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}`, // mois affiché (AAAA-MM)
+  histDay: null,      // jour choisi dans le calendrier (AAAA-MM-JJ), null = tout le mois
+  editWorkout: null,  // copie de la séance enregistrée en cours de modification
   progressExercise: null,
   progressMetric: 'weight',
   volumePeriod: 'week',
@@ -353,15 +359,17 @@ function viewEditTemplate(r) {
     <button class="btn btn-primary btn-xl" data-action="save-template">Enregistrer la séance</button>`;
 }
 
-function stepper(field, value, label) {
+// editing = true : stepper de l'écran « Modifier une séance enregistrée » (pas la séance en cours)
+function stepper(field, value, label, editing = false) {
   const step = field === 'reps' ? 1 : 2.5;
+  const action = editing ? 'ew-step' : 'step';
   return `
     <div class="stepper">
       <span class="stepper-label">${label}</span>
       <div class="stepper-row">
-        <button data-action="step" data-delta="-${step}" aria-label="Moins">−</button>
-        <input data-field="${field}" inputmode="${field === 'reps' ? 'numeric' : 'decimal'}" value="${fmtNum(value)}" autocomplete="off" aria-label="${label}">
-        <button data-action="step" data-delta="${step}" aria-label="Plus">+</button>
+        <button data-action="${action}" data-delta="-${step}" aria-label="Moins">−</button>
+        <input ${editing ? 'data-ew-field' : 'data-field'}="${field}" inputmode="${field === 'reps' ? 'numeric' : 'decimal'}" value="${fmtNum(value)}" autocomplete="off" aria-label="${label}">
+        <button data-action="${action}" data-delta="${step}" aria-label="Plus">+</button>
       </div>
     </div>`;
 }
@@ -416,19 +424,133 @@ function viewWorkout() {
 
 /* ---------- Historique ---------- */
 function viewHistory() {
+  if (state.editWorkout) return viewEditWorkout();
   if (!state.workouts.length) {
     return `<h1>Historique</h1><div class="empty"><div class="big">📅</div><p>Aucune séance enregistrée pour l'instant.</p></div>`;
   }
-  const cards = state.workouts.map((w) => `
+
+  // Calendrier du mois : un point sur chaque jour d'entraînement
+  const [y, m] = state.histMonth.split('-').map(Number);
+  const first = new Date(y, m - 1, 1);
+  const daysInMonth = new Date(y, m, 0).getDate();
+  const offset = (first.getDay() + 6) % 7; // la semaine commence le lundi
+  const byDay = {};
+  for (const w of state.workouts) (byDay[localDay(new Date(w.date))] ||= []).push(w);
+  const today = localDay();
+  const cells = [];
+  for (let i = 0; i < offset; i++) cells.push('<span class="cal-day blank"></span>');
+  for (let d = 1; d <= daysInMonth; d++) {
+    const day = `${y}-${pad2(m)}-${pad2(d)}`;
+    const cls = [byDay[day] ? 'has' : '', day === state.histDay ? 'sel' : '', day === today ? 'today' : ''].join(' ');
+    cells.push(`<button class="cal-day ${cls}" data-action="hist-day" data-day="${day}">${d}</button>`);
+  }
+  const monthName = first.toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' });
+
+  // Séances affichées : le jour choisi, sinon tout le mois
+  const shown = state.histDay
+    ? byDay[state.histDay] || []
+    : state.workouts.filter((w) => localDay(new Date(w.date)).startsWith(state.histMonth));
+  const title = state.histDay
+    ? `${fmtDate(dayToIso(state.histDay))} · <button class="link" data-action="hist-day" data-day="${state.histDay}">voir tout le mois</button>`
+    : `${shown.length} séance(s) en ${first.toLocaleDateString('fr-FR', { month: 'long' })}`;
+
+  const cards = shown.map((w) => `
     <section class="card">
       <div class="hist-head">
         <h2>${esc(w.templateName)}</h2>
         <span class="muted small">${w.programName ? esc(w.programName) + ' · ' : ''}${fmtDate(w.date)}</span>
       </div>
       ${w.exercises.map((e) => `<p class="hist-ex"><strong>${esc(e.name)}</strong>${esc(fmtSets(e.sets))}</p>`).join('')}
-      <button class="link" data-action="delete-workout" data-id="${w.id}">Supprimer cette séance</button>
+      <div class="btn-row" style="margin-top:12px">
+        <button class="btn btn-secondary" data-action="edit-workout" data-id="${w.id}">✏️ Modifier</button>
+        <button class="btn btn-ghost" data-action="delete-workout" data-id="${w.id}">Supprimer</button>
+      </div>
     </section>`).join('');
-  return `<h1>Historique</h1><p class="muted small">${state.workouts.length} séance(s)</p>${cards}`;
+
+  return `
+    <h1>Historique</h1>
+    <section class="card">
+      <div class="cal-head">
+        <button class="icon-btn" data-action="hist-month" data-dir="-1" aria-label="Mois précédent">‹</button>
+        <h2>${monthName}</h2>
+        <button class="icon-btn" data-action="hist-month" data-dir="1" aria-label="Mois suivant">›</button>
+      </div>
+      <div class="cal-grid">
+        ${['L', 'M', 'M', 'J', 'V', 'S', 'D'].map((d) => `<span class="cal-wd">${d}</span>`).join('')}
+        ${cells.join('')}
+      </div>
+    </section>
+    <p class="muted small">${title}</p>
+    ${cards || emptyHistoryMessage()}`;
+}
+
+// Mois ou jour sans séance : on propose d'aller directement à la séance la plus récente avant
+function emptyHistoryMessage() {
+  const limit = state.histDay || `${state.histMonth}-01`;
+  const prev = state.workouts.find((w) => localDay(new Date(w.date)) < limit);
+  const text = state.histDay ? 'Aucune séance ce jour-là.' : 'Aucune séance ce mois-ci pour l\'instant.';
+  return `
+    <div class="empty-hist">
+      <p class="muted">${text}</p>
+      ${prev ? `<button class="btn btn-secondary" data-action="hist-goto" data-day="${localDay(new Date(prev.date))}">Voir la dernière séance (${fmtDate(prev.date)}) ›</button>` : ''}
+    </div>`;
+}
+
+/* ---------- Modifier une séance déjà enregistrée ---------- */
+function viewEditWorkout() {
+  const w = state.editWorkout;
+  const exercises = w.exercises.map((ex, i) => `
+    <section class="card" data-ewx="${i}">
+      <div class="ex-head">
+        <span class="ex-title">${esc(ex.name)}</span>
+        <button class="icon-btn" data-action="ew-remove-ex" aria-label="Retirer l'exercice">✕</button>
+      </div>
+      ${ex.sets.map((s, j) => `
+        <div class="set" data-ews="${j}">
+          <div class="set-top">
+            <span class="set-num">Série ${j + 1}</span>
+            ${ex.sets.length > 1 ? '<button class="link" data-action="ew-remove-set">Retirer</button>' : ''}
+          </div>
+          <div class="set-fields">
+            ${stepper('reps', s.reps, 'Répétitions', true)}
+            ${stepper('weight', s.weight, 'Poids (kg)', true)}
+          </div>
+        </div>`).join('')}
+      <button class="btn btn-secondary" data-action="ew-add-set">+ Ajouter une série</button>
+    </section>`).join('');
+
+  return `
+    <button class="back" data-action="ew-cancel">‹ Annuler</button>
+    <h1>Modifier la séance</h1>
+    <section class="card">
+      <p class="muted small" style="margin-top:0">${esc(w.templateName)}${w.programName ? ' · ' + esc(w.programName) : ''}</p>
+      <label class="field"><span>Date de la séance</span>
+        <input type="date" id="ew-date" value="${w.day}" max="${localDay()}"></label>
+    </section>
+    ${exercises || '<p class="muted">Plus aucun exercice dans cette séance.</p>'}
+    <button class="btn btn-secondary" data-action="ew-add-ex">+ Ajouter un exercice</button>
+    <button class="btn btn-primary btn-xl" data-action="ew-save">Enregistrer les modifications</button>`;
+}
+
+async function saveEditedWorkout() {
+  const w = state.editWorkout;
+  const exercises = w.exercises.filter((e) => e.sets.length);
+  if (!exercises.length) {
+    return showMessage('Séance vide', 'Il n\'y a plus aucune série. Pour supprimer la séance, utilise « Supprimer » dans l\'historique.');
+  }
+  // Nouvelle date : même heure qu'avant, au jour choisi
+  const date = new Date(w.date);
+  const [y, m, d] = w.day.split('-').map(Number);
+  date.setFullYear(y, m - 1, d);
+  const { day, ...saved } = { ...w, exercises, date: date.toISOString() };
+  await dbPut('workouts', saved);
+  state.workouts = state.workouts.map((x) => (x.id === saved.id ? saved : x)).sort((a, b) => b.date.localeCompare(a.date));
+  state.editWorkout = null;
+  state.histDay = day;
+  state.histMonth = day.slice(0, 7);
+  render();
+  scrollTo(0, 0);
+  toast('Séance modifiée ✅');
 }
 
 /* ---------- Progrès ---------- */
@@ -447,12 +569,173 @@ function exerciseNames() {
 }
 
 function viewProgress() {
-  const seg = [['exercises', 'Exercices'], ['bodyweight', 'Poids de corps']].map(([id, label]) =>
+  const seg = [['global', 'Global'], ['exercises', 'Exercices'], ['bodyweight', 'Pesées']].map(([id, label]) =>
     `<button class="${id === state.progressView ? 'on' : ''}" data-action="progress-view" data-id="${id}">${label}</button>`).join('');
+  const views = { global: viewGlobalProgress, exercises: viewExerciseProgress, bodyweight: viewBodyweight };
   return `
     <h1>Progrès</h1>
-    <div class="seg two">${seg}</div>
-    ${state.progressView === 'bodyweight' ? viewBodyweight() : viewExerciseProgress()}`;
+    <div class="seg">${seg}</div>
+    ${views[state.progressView]()}`;
+}
+
+/* ---------- Progrès global : % de progression entre deux périodes ---------- */
+// Force estimée d'une série (formule d'Epley) : 10 × 60 kg vaut plus que 8 × 60 kg
+const estimatedMax = (s) => s.weight * (1 + s.reps / 30);
+const fmtPct = (x) => `${x > 0 ? '+' : ''}${fmtNum(Math.round(x * 1000) / 10)} %`;
+
+// Meilleure performance de chaque exercice sur une liste de séances
+function bestPerfs(workouts) {
+  const map = {};
+  for (const w of workouts) {
+    for (const ex of w.exercises) {
+      const p = (map[keyOf(ex.name)] ||= { name: ex.name, max: 0, reps: 0, weighted: false });
+      for (const s of ex.sets) {
+        if (s.weight > 0) { p.weighted = true; p.max = Math.max(p.max, estimatedMax(s)); }
+        p.reps = Math.max(p.reps, s.reps);
+      }
+    }
+  }
+  return map;
+}
+
+// Exercices faits dans les deux périodes, avec leur progression en %
+function compareWorkouts(current, previous) {
+  const now = bestPerfs(current);
+  const before = bestPerfs(previous);
+  const rows = [];
+  for (const [k, a] of Object.entries(now)) {
+    const b = before[k];
+    if (!b) continue;
+    const useWeight = a.weighted && b.weighted; // sinon (poids du corps) : on compare les reps
+    const x = useWeight ? a.max : a.reps;
+    const y = useWeight ? b.max : b.reps;
+    if (!y) continue;
+    rows.push({ name: a.name, pct: (x - y) / y, muscles: (exerciseMuscles(a.name) || { primary: [] }).primary });
+  }
+  return rows;
+}
+
+// Durées proposées (en jours). « custom » = date de départ choisie à la main
+// (tableau et pas objet : un objet range les clés numériques avant « cycle »)
+const GLOBAL_PERIODS = [['cycle', 'Cycle'], ['14', '2 sem.'], ['30', '1 mois'], ['90', '3 mois'], ['180', '6 mois'], ['365', '1 an'], ['all', 'Tout'], ['custom', '📅 Date']];
+
+// Progression sur une durée : pour chaque exercice, sa première séance de la période comparée à la plus récente
+function compareOverSpan(workouts) {
+  const sessions = {}; // exercice → ses perfs, de la plus ancienne à la plus récente
+  for (const w of [...workouts].reverse()) {
+    for (const ex of w.exercises) {
+      const perf = bestPerfs([{ exercises: [ex] }])[keyOf(ex.name)];
+      (sessions[keyOf(ex.name)] ||= []).push(perf);
+    }
+  }
+  const rows = [];
+  for (const list of Object.values(sessions)) {
+    if (list.length < 2) continue;
+    const first = list[0];
+    const last = list[list.length - 1];
+    const useWeight = first.weighted && last.weighted;
+    const x = useWeight ? last.max : last.reps;
+    const y = useWeight ? first.max : first.reps;
+    if (!y) continue;
+    rows.push({ name: last.name, pct: (x - y) / y, muscles: (exerciseMuscles(last.name) || { primary: [] }).primary });
+  }
+  return rows;
+}
+
+// Séances à comparer selon la période choisie, et une phrase pour l'expliquer
+function globalComparison(period) {
+  if (period === 'cycle') {
+    const lastTpl = state.workouts.length && state.templates.find((t) => t.id === state.workouts[0].templateId);
+    const program = state.programs.find((p) => p.id === (state.activeProgram || (lastTpl && lastTpl.programId)));
+    const tpls = program ? programTemplates(program.id) : [];
+    if (!tpls.length) return { rows: [], desc: 'Choisis d\'abord un programme dans l\'onglet Séance.', hint: '' };
+    const ids = new Set(tpls.map((t) => t.id));
+    const list = state.workouts.filter((w) => ids.has(w.templateId));
+    return {
+      rows: compareWorkouts(list.slice(0, tpls.length), list.slice(tpls.length, tpls.length * 2)),
+      desc: `Ton dernier cycle de ${esc(program.name)} comparé au précédent`,
+      hint: 'Il faut avoir fait au moins 2 cycles.',
+    };
+  }
+  let from = null;
+  if (period === 'custom') {
+    from = new Date(dayToIso(state.globalFrom));
+    from.setHours(0, 0, 0, 0);
+  } else if (period !== 'all') {
+    from = new Date();
+    from.setHours(0, 0, 0, 0);
+    from.setDate(from.getDate() - (+period - 1));
+  }
+  const workouts = from ? state.workouts.filter((w) => new Date(w.date) >= from) : state.workouts;
+  return {
+    rows: compareOverSpan(workouts),
+    desc: `${from ? `Depuis le ${fmtDate(from.toISOString())}` : 'Depuis ta toute première séance'} : la première fois que tu as fait chaque exercice sur la période, comparée à la plus récente`,
+    hint: 'Il faut avoir fait le même exercice au moins 2 fois sur la période.',
+  };
+}
+
+function pctBar(pct, maxAbs) {
+  const width = Math.min(100, (Math.abs(pct) / maxAbs) * 100);
+  return `<div class="pct-bar"><span class="${pct >= 0 ? 'up' : 'down'}" style="width:${width}%"></span></div>`;
+}
+
+function viewGlobalProgress() {
+  const chips = GLOBAL_PERIODS.map(([id, label]) =>
+    `<button class="chip ${id === state.globalPeriod ? 'on' : ''}" data-action="global-period" data-id="${id}">${label}</button>`).join('');
+  const datePicker = state.globalPeriod === 'custom' ? `
+    <label class="field"><span>Voir mes progrès depuis le…</span>
+      <input type="date" id="global-from" value="${state.globalFrom}" max="${localDay()}"></label>` : '';
+  const { rows, desc, hint } = globalComparison(state.globalPeriod);
+  const head = `<div class="chips-wrap">${chips}</div>${datePicker}<p class="muted small">${desc}</p>`;
+
+  if (!rows.length) {
+    return `${head}<div class="empty"><div class="big">📊</div>
+      <p>Pas encore assez de séances pour comparer.<br>${hint}</p></div>`;
+  }
+
+  const mean = (list) => list.reduce((a, r) => a + r.pct, 0) / list.length;
+  const overall = mean(rows);
+  const cls = (x) => (x > 0.0005 ? 'up' : x < -0.0005 ? 'down' : '');
+  const ups = rows.filter((r) => r.pct > 0.0005).length;
+  const downs = rows.filter((r) => r.pct < -0.0005).length;
+
+  const muscles = Object.keys(MUSCLE_LABELS)
+    .map((m) => ({ m, list: rows.filter((r) => r.muscles.includes(m)) }))
+    .filter((x) => x.list.length)
+    .map((x) => ({ ...x, pct: mean(x.list) }))
+    .sort((a, b) => b.pct - a.pct);
+  const maxAbs = Math.max(...rows.map((r) => Math.abs(r.pct)), 0.01);
+
+  const muscleRows = muscles.map(({ m, list, pct }) => {
+    const open = state.globalMuscle === m;
+    const detail = open ? `
+      <div class="pct-detail">
+        ${list.slice().sort((a, b) => b.pct - a.pct).map((r) => `
+          <div class="pct-ex"><span>${esc(r.name)}</span><strong class="${cls(r.pct)}">${fmtPct(r.pct)}</strong></div>`).join('')}
+      </div>` : '';
+    return `
+      <div class="pct-row ${open ? 'open' : ''}">
+        <button class="pct-main" data-action="global-muscle" data-m="${m}">
+          <span class="pct-name">${MUSCLE_LABELS[m]} <span class="muted small">· ${list.length} exo${list.length > 1 ? 's' : ''}</span></span>
+          <strong class="${cls(pct)}">${fmtPct(pct)}</strong>
+          <span class="pct-chevron">${open ? '▾' : '›'}</span>
+        </button>
+        ${pctBar(pct, maxAbs)}
+        ${detail}
+      </div>`;
+  }).join('');
+
+  return `
+    ${head}
+    <section class="card global-hero">
+      <span class="stat-label">Progression moyenne</span>
+      <span class="global-pct ${cls(overall)}">${fmtPct(overall)}</span>
+      <span class="muted small">sur ${rows.length} exercice${rows.length > 1 ? 's' : ''} comparé${rows.length > 1 ? 's' : ''} · ${ups} en hausse · ${downs} en baisse</span>
+    </section>
+    <h3>Par muscle</h3>
+    <p class="muted small">Touche un muscle pour voir le détail de ses exercices.</p>
+    <section class="card">${muscleRows}</section>
+    <p class="muted small">Calcul : pour chaque exercice, on compare ta meilleure série d'une période à l'autre, en combinant poids et répétitions (force estimée). Au poids du corps : le nombre de répétitions. Un muscle = la moyenne des exercices où il est le muscle principal.</p>`;
 }
 
 /* ---------- Poids de corps ---------- */
@@ -592,7 +875,7 @@ function chartSVG(points) {
 }
 
 /* ---------- Volume : séries par muscle ---------- */
-const VOLUME_PERIODS = { week: 'Semaine', lastweek: 'Sem. passée', cycle: 'Cycle', month: '30 jours' };
+const VOLUME_PERIODS = { week: '7 jours', lastweek: 'Sem. passée', cycle: 'Cycle', month: '30 jours' };
 
 function startOfWeek(date) {
   const d = new Date(date);
@@ -605,7 +888,11 @@ function startOfWeek(date) {
 function volumeWorkouts(period) {
   const between = (from, to) => state.workouts.filter((w) => new Date(w.date) >= from && (!to || new Date(w.date) < to));
   if (period === 'week') {
-    return { workouts: between(startOfWeek(new Date()), null), desc: 'Depuis lundi' };
+    // 7 derniers jours glissants (aujourd'hui compris) : jamais vide un lundi matin
+    const from = new Date();
+    from.setHours(0, 0, 0, 0);
+    from.setDate(from.getDate() - 6);
+    return { workouts: between(from, null), desc: 'Les 7 derniers jours' };
   }
   if (period === 'lastweek') {
     const to = startOfWeek(new Date());
@@ -1356,6 +1643,12 @@ $app.addEventListener('click', async (e) => {
   const ex = exEl && state.draft ? state.draft.exercises[+exEl.dataset.ex] : null;
   const set = ex && setEl ? ex.sets[+setEl.dataset.set] : null;
 
+  // Contexte « modifier une séance enregistrée »
+  const ewxEl = btn.closest('[data-ewx]');
+  const ewEx = ewxEl && state.editWorkout ? state.editWorkout.exercises[+ewxEl.dataset.ewx] : null;
+  const ewsEl = btn.closest('[data-ews]');
+  const ewSet = ewEx && ewsEl ? ewEx.sets[+ewsEl.dataset.ews] : null;
+
   switch (action) {
     case 'start':
       return startWorkout(state.templates.find((t) => t.id === btn.dataset.id));
@@ -1422,6 +1715,72 @@ $app.addEventListener('click', async (e) => {
 
     case 'metric':
       state.progressMetric = btn.dataset.id;
+      return render();
+    case 'hist-month': {
+      const [y, m] = state.histMonth.split('-').map(Number);
+      const d = new Date(y, m - 1 + +btn.dataset.dir, 1);
+      state.histMonth = `${d.getFullYear()}-${pad2(d.getMonth() + 1)}`;
+      state.histDay = null;
+      return render();
+    }
+    case 'hist-goto':
+      state.histMonth = btn.dataset.day.slice(0, 7);
+      state.histDay = btn.dataset.day;
+      return render();
+    case 'hist-day':
+      state.histDay = state.histDay === btn.dataset.day ? null : btn.dataset.day;
+      return render();
+
+    case 'edit-workout': {
+      const w = state.workouts.find((x) => x.id === btn.dataset.id);
+      state.editWorkout = { ...JSON.parse(JSON.stringify(w)), day: localDay(new Date(w.date)) };
+      render();
+      return scrollTo(0, 0);
+    }
+    case 'ew-cancel':
+      state.editWorkout = null;
+      return render();
+    case 'ew-step': {
+      const input = btn.closest('.stepper').querySelector('input');
+      const v = Math.max(0, Math.round((num(input.value) + parseFloat(btn.dataset.delta)) * 100) / 100);
+      ewSet[input.dataset.ewField] = v;
+      input.value = fmtNum(v);
+      return;
+    }
+    case 'ew-add-set': {
+      const prev = ewEx.sets[ewEx.sets.length - 1] || { reps: 10, weight: 0 };
+      ewEx.sets.push({ reps: prev.reps, weight: prev.weight });
+      return render();
+    }
+    case 'ew-remove-set':
+      ewEx.sets.splice(+btn.closest('[data-ews]').dataset.ews, 1);
+      return render();
+    case 'ew-remove-ex':
+      if (!(await askConfirm('Retirer l\'exercice ?', `« ${ewEx.name} » sera retiré de cette séance.`, 'Retirer', true))) return;
+      state.editWorkout.exercises.splice(+btn.closest('[data-ewx]').dataset.ewx, 1);
+      return render();
+    case 'ew-add-ex':
+      return openPicker((names) => {
+        for (const name of names) {
+          state.editWorkout.exercises.push({ name, sets: initialSets(name).map(({ reps, weight }) => ({ reps, weight })) });
+        }
+        render();
+      });
+    case 'ew-save':
+      return saveEditedWorkout();
+
+    case 'global-period':
+      state.globalPeriod = btn.dataset.id;
+      state.globalMuscle = null;
+      if (state.globalPeriod === 'custom' && !state.globalFrom) {
+        // Par défaut : il y a 2 mois
+        const d = new Date();
+        d.setMonth(d.getMonth() - 2);
+        state.globalFrom = localDay(d);
+      }
+      return render();
+    case 'global-muscle':
+      state.globalMuscle = state.globalMuscle === btn.dataset.m ? null : btn.dataset.m;
       return render();
     case 'progress-view':
       state.progressView = btn.dataset.id;
@@ -1521,16 +1880,32 @@ $app.addEventListener('input', (e) => {
 });
 
 // Quand on tape dans un champ, on sélectionne tout pour remplacer la valeur directement
+// Saisie au clavier dans l'écran « Modifier une séance enregistrée »
+$app.addEventListener('input', (e) => {
+  const w = state.editWorkout;
+  if (!w) return;
+  if (e.target.id === 'ew-date' && e.target.value) w.day = e.target.value;
+  if (e.target.dataset.ewField) {
+    const ex = w.exercises[+e.target.closest('[data-ewx]').dataset.ewx];
+    ex.sets[+e.target.closest('[data-ews]').dataset.ews][e.target.dataset.ewField] = num(e.target.value);
+  }
+});
+
+const isNumberField = (el) => el.dataset.field || el.dataset.ewField;
 $app.addEventListener('focusin', (e) => {
-  if (e.target.dataset.field) setTimeout(() => e.target.setSelectionRange(0, e.target.value.length), 0);
+  if (isNumberField(e.target)) setTimeout(() => e.target.setSelectionRange(0, e.target.value.length), 0);
 });
 $app.addEventListener('focusout', (e) => {
-  if (e.target.dataset.field) e.target.value = fmtNum(num(e.target.value));
+  if (isNumberField(e.target)) e.target.value = fmtNum(num(e.target.value));
 });
 
 $app.addEventListener('change', (e) => {
   if (e.target.dataset.action === 'pick-exercise') {
     state.progressExercise = e.target.value;
+    render();
+  } else if (e.target.id === 'global-from' && e.target.value) {
+    state.globalFrom = e.target.value;
+    state.globalMuscle = null;
     render();
   } else if (e.target.id === 'prog-name') {
     renameProgram(e.target.dataset.id, e.target.value);
