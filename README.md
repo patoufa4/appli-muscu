@@ -30,6 +30,9 @@ Tout est stocké **sur le téléphone** (IndexedDB), et l'app marche **sans rés
 - **Exercice introuvable ?** Tape son nom puis *Créer « … »* : choisis le pinceau *Principal* ou
   *Secondaire* et touche les muscles sur le bonhomme (ou dans la liste). Il est ensuite compté dans
   le Volume. Pour changer ses muscles plus tard : bouton **i** → *Modifier les muscles*.
+- **Corriger les muscles de n'importe quel exercice** (même ceux de la bibliothèque) : bouton **i** →
+  *Modifier les muscles*. Le Volume et les % par muscle en tiennent compte. *Remettre les muscles d'origine*
+  pour annuler.
 
 ## Historique
 
