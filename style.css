@@ -285,6 +285,41 @@ input, textarea, select { font: inherit; }
 .bodymap .ms { fill: #ff8a80; opacity: 0.75; }
 .bodymap .mh { fill: #ff3b30; }
 
+/* ---------- Poids de corps ---------- */
+.bw-stepper { grid-template-columns: 64px 1fr 64px; height: 64px; }
+.bw-stepper input { font-size: 30px; }
+
+/* ---------- Minuteur de repos ---------- */
+.rest-btn {
+  display: block; width: 100%; margin-top: 8px; padding: 10px; min-height: 44px; text-align: left;
+  background: var(--surface-2); border: 0; border-radius: 10px; font-size: 15px;
+}
+#rest {
+  position: fixed; left: 10px; right: 10px; z-index: 15;
+  bottom: calc(var(--safe-bottom) + 70px);
+  max-width: 540px; margin: 0 auto; overflow: hidden;
+  background: #26262e; border: 2px solid var(--accent); border-radius: 18px;
+  padding: 10px 12px; box-shadow: 0 8px 30px rgba(0, 0, 0, 0.5);
+}
+#rest[hidden] { display: none; }
+.rest-fill { position: absolute; left: 0; top: 0; bottom: 0; width: 0; background: rgba(255, 107, 53, 0.18); transition: width 0.25s linear; }
+.rest-info, .rest-actions { position: relative; }
+.rest-info { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; }
+.rest-label { font-size: 14px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rest-time { font-size: 34px; font-weight: 800; font-variant-numeric: tabular-nums; }
+.rest-actions { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; margin-top: 6px; }
+.rest-actions button { min-height: 44px; border: 0; border-radius: 10px; background: var(--surface-2); font-size: 16px; font-weight: 700; }
+.rest-actions [data-rest=skip] { background: var(--accent); color: var(--accent-ink); }
+#rest.done { border-color: var(--ok); animation: rest-flash 0.5s ease-in-out 3; }
+#rest.done .rest-fill { background: rgba(53, 196, 106, 0.25); }
+#rest.done .rest-time { font-size: 22px; color: var(--ok); }
+#rest.done .rest-actions { display: none; }
+@keyframes rest-flash { 50% { background: #1f3b2a; } }
+body.resting { padding-bottom: calc(var(--safe-bottom) + 220px); }
+.rest-picker { display: flex; align-items: center; justify-content: center; gap: 24px; margin: 12px 0; }
+.rest-value { font-size: 44px; font-weight: 800; min-width: 120px; text-align: center; font-variant-numeric: tabular-nums; }
+.icon-btn.big { width: 56px; height: 56px; font-size: 28px; color: var(--text); }
+
 /* ---------- Éditeur de muscles ---------- */
 .seg.two { grid-template-columns: 1fr 1fr; }
 .seg.two button { display: flex; align-items: center; justify-content: center; gap: 8px; }
