@@ -115,6 +115,17 @@ function toast(msg) {
 /* =====================================================================
    État de l'app
    ===================================================================== */
+// Préférences réglables dans Réglages → Préférences (toutes activées par défaut)
+const DEFAULT_PREFS = {
+  feelings: true,      // pastilles de ressenti 🟢🟡🔴 + conseils 💡
+  autoRest: true,      // chrono de repos lancé automatiquement après chaque série
+  restSound: true,     // bip à la fin du repos
+  sessionTimer: true,  // chrono de la séance dans le bandeau du haut
+  autoCollapse: true,  // exercice terminé replié + écran qui passe au suivant
+  defaultRest: 120,    // repos par défaut (secondes) quand rien n'est réglé pour l'exercice
+  weightStep: 2.5,     // pas des boutons − / + du poids (kg)
+};
+
 const state = {
   tab: 'train',
   route: { name: 'programs' }, // écran affiché dans l'onglet Séance
@@ -128,6 +139,7 @@ const state = {
   restTimes: {},      // temps de repos choisi par exercice : clé → secondes
   notes: {},          // note par exercice (réglage machine…) : clé → texte
   brands: [],         // marques de machine ajoutées à la main
+  prefs: {},          // préférences (Réglages) : voir DEFAULT_PREFS
   bodyweight: [],     // pesées, de la plus ancienne à la plus récente
   progressView: 'global',
   globalPeriod: 'cycle',   // Progrès → Global : 'cycle', une durée en jours ('14', '90'…), 'all' ou 'custom'
@@ -198,6 +210,7 @@ async function loadAll() {
   state.restTimes = (await dbGet('meta', 'restTimes'))?.value || {};
   state.notes = (await dbGet('meta', 'notes'))?.value || {};
   state.brands = (await dbGet('meta', 'brands'))?.value || [];
+  state.prefs = { ...DEFAULT_PREFS, ...((await dbGet('meta', 'prefs'))?.value || {}) };
   state.bodyweight = (await dbAll('bodyweight')).sort((a, b) => a.date.localeCompare(b.date));
 }
 
@@ -388,7 +401,7 @@ function viewEditTemplate(r) {
 
 // editing = true : stepper de l'écran « Modifier une séance enregistrée » (pas la séance en cours)
 function stepper(field, value, label, editing = false) {
-  const step = field === 'reps' ? 1 : 2.5;
+  const step = field === 'reps' ? 1 : state.prefs.weightStep || 2.5;
   const action = editing ? 'ew-step' : 'step';
   return `
     <div class="stepper">
@@ -415,9 +428,10 @@ async function completeSet(ex, i, set) {
   const partnerNext = next && next.i > i && next.i <= b;
   if (!next) stopRest(); // pas de chrono après la toute dernière série
   else if (partnerNext) stopRest();
-  else startRest(ex.name);
+  else if (state.prefs.autoRest) startRest(ex.name);
   await saveDraft();
   render();
+  if (!state.prefs.autoCollapse) return;
   // On amène l'écran sur la prochaine série si elle est sur un autre exercice
   if (!next) document.querySelector('[data-action=finish]')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
   else if (next.i !== i) document.querySelector(`.exercise[data-ex="${next.i}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -429,16 +443,18 @@ const FEELS = [
   { id: 'ok', label: 'Moyen', emoji: '🟡' },
   { id: 'hard', label: 'Dur', emoji: '🔴' },
 ];
-const feelEmoji = (id) => (FEELS.find((f) => f.id === id) || {}).emoji || '';
+const feelEmoji = (id) => (state.prefs.feelings && (FEELS.find((f) => f.id === id) || {}).emoji) || '';
 
 // Les 3 pastilles d'une série. En séance, en toucher une valide aussi la série.
 function feelDots(set, action) {
+  if (!state.prefs.feelings) return '';
   return `<span class="feels">${FEELS.map((f) =>
     `<button class="feel ${f.id} ${set.feel === f.id ? 'on' : ''}" data-action="${action}" data-feel="${f.id}" aria-label="${f.label}"></button>`).join('')}</span>`;
 }
 
 // Conseil pour aujourd'hui, d'après le ressenti de la dernière fois
 function feelTip(sets) {
+  if (!state.prefs.feelings) return '';
   const felt = sets.filter((s) => s.feel);
   if (!felt.length) return '';
   if (felt.every((s) => s.feel === 'easy')) return '<span class="feel-tip">💡 C\'était facile : essaie d\'augmenter le poids.</span>';
@@ -499,7 +515,7 @@ function viewWorkout() {
 
   const cards = d.exercises.map((ex, i) => {
     // Exercice terminé : replié sur une ligne (on peut le rouvrir)
-    if (isComplete(ex) && !ex.expanded) {
+    if (state.prefs.autoCollapse && isComplete(ex) && !ex.expanded) {
       return `
         <section class="card exercise collapsed" data-ex="${i}">
           <button class="ex-collapsed" data-action="expand-ex">
@@ -554,7 +570,7 @@ function viewWorkout() {
         </div>
         ${sets}
         <button class="btn btn-secondary" data-action="add-set">+ Ajouter une série</button>
-        ${isComplete(ex) ? '<button class="link" data-action="collapse-ex">Replier ▴</button>' : ''}
+        ${state.prefs.autoCollapse && isComplete(ex) ? '<button class="link" data-action="collapse-ex">Replier ▴</button>' : ''}
       </section>`;
   });
 
@@ -573,7 +589,9 @@ function viewWorkout() {
     <div class="wk-head">
       <div class="wk-title">
         <strong>${esc(d.templateName)}</strong>
-        <span class="muted small">${doneCount}/${total} séries · <span class="wk-elapsed" title="Commencée à ${fmtTime(d.startedAt)}">⏱ ${fmtElapsed(d.startedAt)}</span></span>
+        <span class="muted small">${doneCount}/${total} séries · ${state.prefs.sessionTimer
+          ? `<span class="wk-elapsed" title="Commencée à ${fmtTime(d.startedAt)}">⏱ ${fmtElapsed(d.startedAt)}</span>`
+          : `depuis ${fmtTime(d.startedAt)}`}</span>
         <div class="wk-progress"><span style="width:${total ? (doneCount / total) * 100 : 0}%"></span></div>
       </div>
       <button class="btn btn-primary wk-finish" data-action="finish">Terminer</button>
@@ -1216,10 +1234,50 @@ function viewVolume() {
 }
 
 /* ---------- Réglages ---------- */
+/* ---------- Préférences (Réglages) ---------- */
+const PREF_SWITCHES = [
+  ['feelings', '🟢🟡🔴 Ressenti des séries', 'Les 3 pastilles sur chaque série, et les conseils 💡 à la séance suivante.'],
+  ['autoRest', '⏱ Chrono de repos automatique', 'Se lance tout seul quand tu valides une série.'],
+  ['restSound', '🔔 Bip de fin de repos', 'Sonne à la fin du chrono de repos (coupe le mode silencieux pour l\'entendre).'],
+  ['sessionTimer', '⏱ Chrono de la séance', 'Le temps écoulé depuis le début, dans le bandeau du haut.'],
+  ['autoCollapse', '↕️ Replier les exos terminés', 'Un exercice fini se replie et l\'écran passe tout seul au suivant.'],
+];
+const REST_CHOICES = [60, 90, 120, 150, 180];
+const STEP_CHOICES = [1, 1.25, 2, 2.5, 5];
+
+function viewPrefs() {
+  const p = state.prefs;
+  const switches = PREF_SWITCHES.map(([key, label, desc]) => `
+    <button class="pref-row" data-action="toggle-pref" data-key="${key}" role="switch" aria-checked="${!!p[key]}">
+      <span class="pref-text"><strong>${label}</strong><span class="muted small">${desc}</span></span>
+      <span class="switch ${p[key] ? 'on' : ''}"><span></span></span>
+    </button>`).join('');
+  const chips = (key, values, fmt) => values.map((v) =>
+    `<button class="chip ${p[key] === v ? 'on' : ''}" data-action="set-pref" data-key="${key}" data-value="${v}">${fmt(v)}</button>`).join('');
+  return `
+    <h3>Préférences</h3>
+    <section class="card prefs">${switches}</section>
+    <section class="card">
+      <strong>Repos par défaut</strong>
+      <p class="muted small">Pour les exercices où tu n'as pas réglé de temps de repos.</p>
+      <div class="chips-wrap">${chips('defaultRest', REST_CHOICES, fmtClock)}</div>
+      <strong>Pas des boutons − / + du poids</strong>
+      <p class="muted small">De combien le poids change à chaque toucher.</p>
+      <div class="chips-wrap">${chips('weightStep', STEP_CHOICES, (v) => `${fmtNum(v)} kg`)}</div>
+    </section>`;
+}
+
+async function savePrefs() {
+  await dbPut('meta', { key: 'prefs', value: state.prefs });
+  render();
+}
+
 function viewSettings() {
   return `
     <h1>Réglages</h1>
     <p class="muted small">Pour gérer tes programmes et séances : onglet Séance → choisis un programme → « Modifier ce programme ».</p>
+
+    ${viewPrefs()}
 
     <h3>Sauvegarde</h3>
     <section class="card">
@@ -1432,6 +1490,7 @@ async function exportData() {
     restTimes: state.restTimes,
     notes: state.notes,
     brands: state.brands,
+    prefs: state.prefs,
   };
   const name = `muscu-${new Date().toISOString().slice(0, 10)}.json`;
   const file = new File([JSON.stringify(data, null, 2)], name, { type: 'application/json' });
@@ -1473,6 +1532,7 @@ function isValidBackup(data) {
     && (data.restTimes === undefined || (data.restTimes && typeof data.restTimes === 'object'))
     && (data.notes === undefined || (data.notes && typeof data.notes === 'object'))
     && (data.brands === undefined || (Array.isArray(data.brands) && data.brands.every((b) => typeof b === 'string')))
+    && (data.prefs === undefined || (data.prefs && typeof data.prefs === 'object'))
     && (data.custom === undefined || (Array.isArray(data.custom) && data.custom.every((c) => c && typeof c.key === 'string'
       && typeof c.name === 'string' && Array.isArray(c.primary) && Array.isArray(c.secondary))))
     && data.templates.every((t) => t && t.id && typeof t.name === 'string' && Array.isArray(t.exercises))
@@ -1501,6 +1561,7 @@ async function importData(file) {
   if (data.restTimes) tx.objectStore('meta').put({ key: 'restTimes', value: { ...state.restTimes, ...data.restTimes } });
   if (data.notes) tx.objectStore('meta').put({ key: 'notes', value: { ...state.notes, ...data.notes } });
   if (data.brands) tx.objectStore('meta').put({ key: 'brands', value: [...new Set([...state.brands, ...data.brands])] });
+  if (data.prefs) tx.objectStore('meta').put({ key: 'prefs', value: { ...state.prefs, ...data.prefs } });
   data.templates.forEach((t) => tx.objectStore('templates').put(t));
   data.workouts.forEach((w) => tx.objectStore('workouts').put(w));
   await new Promise((res, rej) => { tx.oncomplete = res; tx.onerror = () => rej(tx.error); });
@@ -1959,9 +2020,9 @@ $sheet.addEventListener('click', async (e) => {
 /* =====================================================================
    Minuteur de repos : démarre tout seul quand on coche une série
    ===================================================================== */
-const DEFAULT_REST = 120; // secondes, si rien n'est réglé pour l'exercice
+const DEFAULT_REST = 120; // secondes, si rien n'est réglé pour l'exercice (modifiable dans Réglages)
 const REST_PRESETS = [30, 45, 60, 90, 120, 150, 180, 240, 300];
-const restFor = (name) => state.restTimes[keyOf(name)] ?? DEFAULT_REST;
+const restFor = (name) => state.restTimes[keyOf(name)] ?? state.prefs.defaultRest ?? DEFAULT_REST;
 const fmtClock = (s) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 const $rest = document.getElementById('rest');
 let restTick = null;
@@ -1976,6 +2037,7 @@ function unlockAudio() {
 }
 
 function beep() {
+  if (!state.prefs.restSound) return;
   if (navigator.vibrate) navigator.vibrate([200, 100, 200]);
   if (!audioCtx) return;
   const t = audioCtx.currentTime;
@@ -2352,6 +2414,16 @@ $app.addEventListener('click', async (e) => {
     case 'global-muscle':
       state.globalMuscle = state.globalMuscle === btn.dataset.m ? null : btn.dataset.m;
       return render();
+    case 'toggle-pref': {
+      const key = btn.dataset.key;
+      state.prefs[key] = !state.prefs[key];
+      if (key === 'autoRest' && !state.prefs.autoRest) stopRest();
+      toast(state.prefs[key] ? 'Activé' : 'Désactivé');
+      return savePrefs();
+    }
+    case 'set-pref':
+      state.prefs[btn.dataset.key] = +btn.dataset.value;
+      return savePrefs();
     case 'progress-view':
       state.progressView = btn.dataset.id;
       return render();
