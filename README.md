@@ -58,6 +58,12 @@ Tout est stocké **sur le téléphone** (IndexedDB), et l'app marche **sans rés
   séries, reps, tonnage, et le détail par exercice avec les 🏆 records. À revoir depuis l'Historique (📊 Bilan).
 - Une séance commencée un jour et terminée le lendemain est enregistrée au jour où tu l'as commencée.
 
+## Préférences (Réglages)
+
+- Interrupteurs pour activer / couper : ressenti des séries 🟢🟡🔴, chrono de repos automatique, bip de fin
+  de repos, chrono de la séance, repli des exercices terminés.
+- **Repos par défaut** (pour les exos sans temps réglé) et **pas des boutons − / +** du poids (1 à 5 kg).
+
 ## Supersets
 
 - Entre deux exercices (en séance ou dans le modèle de séance) : **🔗 Lier en superset**. Les exercices liés
