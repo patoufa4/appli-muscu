@@ -2,7 +2,7 @@
 // Stratégie : on sert la copie en cache tout de suite, et on la met à jour en arrière-plan
 // quand le réseau est dispo. Si une nouvelle version s'installe, la page se recharge toute seule (voir app.js).
 // Pense à changer le numéro de CACHE à chaque mise à jour de l'app.
-const CACHE = 'muscu-v43';
+const CACHE = 'muscu-v44';
 const ASSETS = [
   './',
   './index.html',
