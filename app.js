@@ -573,7 +573,7 @@ function viewWorkout() {
     <div class="wk-head">
       <div class="wk-title">
         <strong>${esc(d.templateName)}</strong>
-        <span class="muted small">${doneCount}/${total} séries · depuis ${fmtTime(d.startedAt)}</span>
+        <span class="muted small">${doneCount}/${total} séries · <span class="wk-elapsed" title="Commencée à ${fmtTime(d.startedAt)}">⏱ ${fmtElapsed(d.startedAt)}</span></span>
         <div class="wk-progress"><span style="width:${total ? (doneCount / total) * 100 : 0}%"></span></div>
       </div>
       <button class="btn btn-primary wk-finish" data-action="finish">Terminer</button>
@@ -2099,6 +2099,19 @@ async function keepScreenOn() {
   try { wakeLock = await navigator.wakeLock.request('screen'); } catch { /* pas grave */ }
 }
 document.addEventListener('visibilitychange', keepScreenOn);
+
+/* ---------- Chrono de la séance (temps écoulé depuis le début), dans le bandeau du haut ---------- */
+function fmtElapsed(startIso) {
+  const s = Math.max(0, Math.floor((Date.now() - new Date(startIso)) / 1000));
+  if (s >= 12 * 3600) return `depuis ${fmtTime(startIso)}`; // séance oubliée ouverte : pas de chrono géant
+  const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = s % 60;
+  return h ? `${h}:${pad2(m)}:${pad2(sec)}` : `${pad2(m)}:${pad2(sec)}`;
+}
+
+setInterval(() => {
+  const el = document.querySelector('.wk-elapsed');
+  if (el && state.draft) el.textContent = `⏱ ${fmtElapsed(state.draft.startedAt)}`;
+}, 1000);
 
 /* =====================================================================
    Événements
