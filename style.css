@@ -158,8 +158,23 @@ input, textarea, select { font: inherit; }
 .exercise [data-action=collapse-ex] { display: block; margin: 6px auto 0; }
 .set-top { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; }
 .set-num { font-weight: 700; flex: 1; padding-left: 4px; }
+/* Ressenti : 3 pastilles (facile / moyen / dur) */
+.feels { display: flex; gap: 6px; flex: none; }
+.feel {
+  width: 30px; height: 30px; padding: 0; border-radius: 50%;
+  background: transparent; border: 3px solid; opacity: 0.55;
+}
+.feel.easy { border-color: #35c46a; }
+.feel.ok { border-color: #f2c94c; }
+.feel.hard { border-color: #ff5a5a; }
+.feel.on { opacity: 1; box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.15); }
+.feel.easy.on { background: #35c46a; }
+.feel.ok.on { background: #f2c94c; }
+.feel.hard.on { background: #ff5a5a; }
+.set .remove-set { padding: 0 4px; font-size: 13px; text-decoration: none; vertical-align: 1px; }
+.feel-tip { display: block; margin-top: 6px; color: var(--text); font-size: 14px; }
 .check {
-  width: 64px; height: 44px; border-radius: 12px;
+  flex: none; width: 56px; height: 44px; border-radius: 12px;
   border: 2px solid var(--border); background: transparent;
   font-size: 22px; font-weight: 700; color: var(--muted);
 }
