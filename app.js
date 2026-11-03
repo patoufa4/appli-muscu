@@ -122,6 +122,7 @@ const DEFAULT_PREFS = {
   restSound: true,     // bip à la fin du repos
   sessionTimer: true,  // chrono de la séance dans le bandeau du haut
   autoCollapse: true,  // exercice terminé replié + écran qui passe au suivant
+  accordion: true,     // exercices repliés : on touche un exercice pour voir ses séries
   defaultRest: 120,    // repos par défaut (secondes) quand rien n'est réglé pour l'exercice
   weightStep: 2.5,     // pas des boutons − / + du poids (kg)
 };
@@ -424,14 +425,16 @@ async function completeSet(ex, i, set) {
   unlockAudio();
   const next = nextSetPosition(state.draft);
   // Superset : pas de repos tant qu'il reste l'exercice suivant du même tour
-  const [, b] = groupOf(exs, i);
+  const [a, b] = groupOf(exs, i);
   const partnerNext = next && next.i > i && next.i <= b;
   if (!next) stopRest(); // pas de chrono après la toute dernière série
   else if (partnerNext) stopRest();
   else if (state.prefs.autoRest) startRest(ex.name);
+  // Mode accordéon : l'exercice (ou le superset) terminé se referme ; c'est toi qui ouvres le suivant
+  if (state.prefs.accordion && exs.slice(a, b + 1).every(isComplete)) state.draft.open = null;
   await saveDraft();
   render();
-  if (!state.prefs.autoCollapse) return;
+  if (!state.prefs.autoCollapse && !state.prefs.accordion) return;
   // On amène l'écran sur la prochaine série si elle est sur un autre exercice
   if (!next) document.querySelector('[data-action=finish]')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
   else if (next.i !== i) document.querySelector(`.exercise[data-ex="${next.i}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -513,19 +516,35 @@ function viewWorkout() {
   const total = d.exercises.reduce((a, ex) => a + ex.sets.length, 0);
   const doneCount = d.exercises.reduce((a, ex) => a + ex.sets.filter((s) => s.done).length, 0);
 
+  const accordion = state.prefs.accordion;
   const cards = d.exercises.map((ex, i) => {
-    // Exercice terminé : replié sur une ligne (on peut le rouvrir)
-    if (state.prefs.autoCollapse && isComplete(ex) && !ex.expanded) {
+    const last = lastPerf(ex.name, ex.brand);
+    // Mode accordéon : un exercice (ou un superset entier) n'est ouvert que si on l'a touché
+    const [ga, gb] = groupOf(d.exercises, i);
+    const isOpen = d.open != null && d.open >= ga && d.open <= gb;
+    const folded = accordion ? !isOpen : state.prefs.autoCollapse && isComplete(ex) && !ex.expanded;
+    if (folded) {
+      const doneSets = ex.sets.filter((s) => s.done).length;
+      if (isComplete(ex)) {
+        return `
+          <section class="card exercise collapsed" data-ex="${i}">
+            <button class="ex-collapsed" data-action="${accordion ? 'open-ex' : 'expand-ex'}">
+              <span class="ex-done-check">✓</span>
+              <span class="ex-collapsed-text"><strong>${esc(variantLabel(ex.name, ex.brand))}</strong><span class="muted small">${esc(fmtSets(ex.sets))}</span></span>
+              <span class="muted small">Modifier ›</span>
+            </button>
+          </section>`;
+      }
       return `
-        <section class="card exercise collapsed" data-ex="${i}">
-          <button class="ex-collapsed" data-action="expand-ex">
-            <span class="ex-done-check">✓</span>
-            <span class="ex-collapsed-text"><strong>${esc(ex.name)}</strong><span class="muted small">${esc(fmtSets(ex.sets))}</span></span>
-            <span class="muted small">Modifier ›</span>
+        <section class="card exercise collapsed ${next && next.i === i ? 'todo' : ''}" data-ex="${i}">
+          <button class="ex-collapsed pending" data-action="open-ex">
+            <span class="ex-count">${doneSets}/${ex.sets.length}</span>
+            <span class="ex-collapsed-text"><strong>${esc(variantLabel(ex.name, ex.brand))}</strong>
+              <span class="muted small">${last ? `Dernière fois : ${esc(fmtSets(last.sets))}` : 'Première fois sur cet exercice'}</span></span>
+            <span class="ex-chevron">›</span>
           </button>
         </section>`;
     }
-    const last = lastPerf(ex.name, ex.brand);
     const note = noteFor(ex.name, ex.brand);
     const sets = ex.sets.map((s, j) => `
       <div class="set ${s.done ? 'done' : ''} ${next && next.i === i && next.j === j ? 'current' : ''}" data-set="${j}">
@@ -546,6 +565,7 @@ function viewWorkout() {
         <div class="ex-head">
           <button class="ex-title" data-action="info" data-name="${esc(ex.name)}"><span>${esc(ex.name)}</span><span class="info-i">i</span></button>
           <div class="move">
+            ${accordion ? '<button class="icon-btn" data-action="close-ex" aria-label="Replier l\'exercice">▴</button>' : ''}
             <button class="icon-btn" data-action="move-ex" data-dir="-1" aria-label="Monter l'exercice" ${i === 0 ? 'disabled' : ''}>↑</button>
             <button class="icon-btn" data-action="move-ex" data-dir="1" aria-label="Descendre l'exercice" ${i === d.exercises.length - 1 ? 'disabled' : ''}>↓</button>
             <button class="icon-btn" data-action="remove-ex" aria-label="Retirer l'exercice">✕</button>
@@ -570,7 +590,9 @@ function viewWorkout() {
         </div>
         ${sets}
         <button class="btn btn-secondary" data-action="add-set">+ Ajouter une série</button>
-        ${state.prefs.autoCollapse && isComplete(ex) ? '<button class="link" data-action="collapse-ex">Replier ▴</button>' : ''}
+        ${accordion
+          ? '<button class="link" data-action="close-ex">Replier ▴</button>'
+          : state.prefs.autoCollapse && isComplete(ex) ? '<button class="link" data-action="collapse-ex">Replier ▴</button>' : ''}
       </section>`;
   });
 
@@ -580,7 +602,13 @@ function viewWorkout() {
     const l = letters[i];
     const opens = l && (i === 0 || letters[i - 1] !== l);
     const closes = l && letters[i + 1] !== l;
-    const link = i < cards.length - 1 ? linkButton(i, !!d.exercises[i].linkNext, 'link-ex') : '';
+    // En mode accordéon, le bouton 🔗 n'apparaît qu'à côté de l'exercice ouvert (moins de défilement)
+    const openAround = d.open != null && [i, i + 1].some((k) => {
+      const [a, b] = groupOf(d.exercises, k);
+      return d.open >= a && d.open <= b;
+    });
+    const showLink = i < cards.length - 1 && (!accordion || d.exercises[i].linkNext || openAround);
+    const link = showLink ? linkButton(i, !!d.exercises[i].linkNext, 'link-ex') : '';
     // Le bouton entre deux exercices d'un même superset reste dans le cadre ; après le dernier, il est en dehors
     return `${opens ? `<div class="ss-group"><span class="ss-tag">🔗 Superset ${l} · enchaîne sans repos</span>` : ''}${html}${closes ? '</div>' : ''}${link}`;
   }).join('');
@@ -596,7 +624,9 @@ function viewWorkout() {
       </div>
       <button class="btn btn-primary wk-finish" data-action="finish">Terminer</button>
     </div>
-    <p class="muted small">Coche ✓ chaque série terminée : la série à faire est encadrée en orange.</p>
+    <p class="muted small">${accordion
+      ? 'Touche un exercice pour voir ses séries. L\'exercice à faire est encadré en orange.'
+      : 'Coche ✓ chaque série terminée : la série à faire est encadrée en orange.'}</p>
     ${exercises}
     <button class="btn btn-secondary" data-action="add-ex">+ Ajouter un exercice</button>
     <button class="btn btn-primary btn-xl" data-action="finish">Terminer et enregistrer</button>
@@ -1240,6 +1270,7 @@ const PREF_SWITCHES = [
   ['autoRest', '⏱ Chrono de repos automatique', 'Se lance tout seul quand tu valides une série.'],
   ['restSound', '🔔 Bip de fin de repos', 'Sonne à la fin du chrono de repos (coupe le mode silencieux pour l\'entendre).'],
   ['sessionTimer', '⏱ Chrono de la séance', 'Le temps écoulé depuis le début, dans le bandeau du haut.'],
+  ['accordion', '📂 Exercices repliés', 'Chaque exercice tient sur une ligne : touche-le pour voir ses séries. Moins de défilement.'],
   ['autoCollapse', '↕️ Replier les exos terminés', 'Un exercice fini se replie et l\'écran passe tout seul au suivant.'],
 ];
 const REST_CHOICES = [60, 90, 120, 150, 180];
@@ -2228,6 +2259,22 @@ $app.addEventListener('click', async (e) => {
         return render();
       }
       return completeSet(ex, +exEl.dataset.ex, set);
+    }
+    case 'open-ex': {
+      // Un seul exercice ouvert à la fois : ouvrir celui-ci referme le précédent
+      const i = +exEl.dataset.ex;
+      const [a] = groupOf(state.draft.exercises, i);
+      state.draft.open = a;
+      await saveDraft();
+      render();
+      return document.querySelector(`.exercise[data-ex="${a}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+    case 'close-ex': {
+      const i = +exEl.dataset.ex;
+      state.draft.open = null;
+      await saveDraft();
+      render();
+      return document.querySelector(`.exercise[data-ex="${i}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     }
     case 'expand-ex':
       ex.expanded = true;
