@@ -46,7 +46,8 @@ Tout est stocké **sur le téléphone** (IndexedDB), et l'app marche **sans rés
 
 ## Pendant la séance
 
-- Bandeau en haut : progression (séries cochées / total) et bouton **Terminer** toujours visible.
+- Bandeau en haut : progression (séries cochées / total), **chrono de la séance** (⏱ temps écoulé depuis le
+  début) et bouton **Terminer** toujours visible.
 - La prochaine série à faire est encadrée en orange. Un exercice terminé se replie tout seul et
   l'écran passe au suivant (« Modifier › » pour le rouvrir).
 - Avant de terminer, l'app prévient s'il reste des séries pas cochées (elles ne seraient pas enregistrées).
