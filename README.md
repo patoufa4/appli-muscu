@@ -46,6 +46,10 @@ Tout est stocké **sur le téléphone** (IndexedDB), et l'app marche **sans rés
 
 ## Pendant la séance
 
+- **Exercices repliés** (par défaut) : chaque exercice tient sur une ligne (séries faites / total, dernière
+  perf). Touche-le pour voir ses séries ; ouvrir un exercice referme le précédent. Un superset s'ouvre en entier.
+  Désactivable dans Réglages → Préférences.
+
 - Bandeau en haut : progression (séries cochées / total), **chrono de la séance** (⏱ temps écoulé depuis le
   début) et bouton **Terminer** toujours visible.
 - La prochaine série à faire est encadrée en orange. Un exercice terminé se replie tout seul et
