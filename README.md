@@ -13,8 +13,9 @@ Tout est stocké **sur le téléphone** (IndexedDB), et l'app marche **sans rés
 - **Modifier** : ouvre le programme → *Modifier ce programme* → renomme-le, ajoute / modifie /
   supprime des séances, et change leur **ordre** avec les flèches ↑ ↓.
 - **Le cycle** : les séances tournent dans l'ordre (ex : Push → Pull → Legs → Push…). En ouvrant
-  le programme, l'app t'affiche en gros **la séance du jour** : celle qui suit la dernière que
-  tu as faite. Si tu fais une autre séance à la place, le cycle reprend après celle-ci.
+  le programme, l'app t'affiche en gros **la séance du jour** : la première du cycle pas encore faite
+  dans le tour en cours. Tu peux faire les séances dans le désordre (touche-en une autre) : celles que tu
+  sautes restent à faire (✓ = déjà faite ce tour). Quand toutes sont faites, un nouveau tour recommence.
 - **Changer de programme** : touche simplement un autre programme dans la liste. Le dernier utilisé
   est marqué *Actuel* et apparaît en premier.
 - Tes perfs sont liées au **nom de l'exercice**, pas au programme : si tu passes de PPL à
@@ -50,12 +51,23 @@ Tout est stocké **sur le téléphone** (IndexedDB), et l'app marche **sans rés
   l'écran passe au suivant (« Modifier › » pour le rouvrir).
 - Avant de terminer, l'app prévient s'il reste des séries pas cochées (elles ne seraient pas enregistrées).
 - Pas de chrono après la toute dernière série.
+- **Bilan de fin de séance** après « Terminer » : évolution en % par rapport à la dernière fois, durée,
+  séries, reps, tonnage, et le détail par exercice avec les 🏆 records. À revoir depuis l'Historique (📊 Bilan).
+- Une séance commencée un jour et terminée le lendemain est enregistrée au jour où tu l'as commencée.
 
 ## Remplacer un exercice
 
 - Pendant la séance, bouton **⇄ Remplacer** sur chaque exercice (machine prise…) : choisis l'alternative
   (la recherche s'ouvre sur le même muscle), elle prend sa place **pour cette séance seulement**.
   « Remettre » pour revenir en arrière. Chaque exercice garde son propre suivi de progrès.
+
+## Marque de la machine
+
+- Sur chaque exercice en séance : **🏷 Machine : Par défaut ▾** → choisis la marque (Hammer Strength, Matrix,
+  Technogym, Gym80, Life Fitness, Panatta…) ou *+ Autre marque…*. Valable pour la séance du jour.
+- Chaque machine a son **propre suivi** (« Dernière fois », courbe, % de progrès) : 45 kg sur une autre
+  machine ne compte pas comme une baisse. Le Volume compte toutes les machines ensemble.
+- Les **notes** sont aussi rangées par machine (réglage du siège…).
 
 ## Notes par exercice
 
