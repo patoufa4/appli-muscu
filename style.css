@@ -399,6 +399,25 @@ input, textarea, select { font: inherit; }
 .pct-ex { display: flex; justify-content: space-between; gap: 10px; padding: 8px 0; font-size: 15px; border-top: 1px solid var(--border); }
 .pct-ex:first-child { border-top: 0; }
 
+/* ---------- Préférences ---------- */
+.prefs { padding: 4px 12px; }
+.pref-row {
+  display: flex; align-items: center; gap: 12px; width: 100%; padding: 12px 0; min-height: 60px;
+  background: none; border: 0; border-top: 1px solid var(--border); text-align: left;
+}
+.pref-row:first-child { border-top: 0; }
+.pref-text { flex: 1; display: flex; flex-direction: column; gap: 2px; }
+.switch {
+  flex: none; width: 52px; height: 32px; border-radius: 99px; position: relative;
+  background: var(--surface-2); border: 1px solid var(--border); transition: background 0.2s;
+}
+.switch span {
+  position: absolute; top: 3px; left: 3px; width: 24px; height: 24px; border-radius: 50%;
+  background: #8a8a96; transition: transform 0.2s, background 0.2s;
+}
+.switch.on { background: var(--ok); border-color: var(--ok); }
+.switch.on span { transform: translateX(20px); background: #fff; }
+
 /* ---------- Bilan de séance ---------- */
 .btn-row.three { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
 .btn-row.three .btn { font-size: 14px; padding: 0 4px; }
