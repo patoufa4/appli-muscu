@@ -176,6 +176,16 @@ input, textarea, select { font: inherit; }
   background: var(--ok); color: var(--ok-ink); font-weight: 800;
 }
 .ex-collapsed-text { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+/* Exercice pas encore fini, replié (mode accordéon) */
+.ex-collapsed.pending { background: var(--surface); }
+.ex-collapsed-text .muted { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ex-count {
+  flex: none; min-width: 44px; height: 32px; padding: 0 6px; border-radius: 99px; display: grid; place-items: center;
+  background: var(--surface-2); font-size: 14px; font-weight: 700; font-variant-numeric: tabular-nums;
+}
+.ex-chevron { flex: none; font-size: 24px; color: var(--muted); }
+.exercise.collapsed.todo { box-shadow: 0 0 0 2px var(--accent); border-radius: 18px; }
+.exercise.collapsed.todo .ex-count { background: var(--accent); color: var(--accent-ink); }
 .exercise [data-action=collapse-ex] { display: block; margin: 6px auto 0; }
 .set-top { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; }
 .set-num { font-weight: 700; flex: 1; padding-left: 4px; }
