@@ -401,6 +401,46 @@ function stepper(field, value, label, editing = false) {
 
 const isComplete = (ex) => ex.sets.length > 0 && ex.sets.every((s) => s.done);
 
+// Valide une série : chrono de repos, et si l'exercice est fini il se replie et on passe au suivant
+async function completeSet(ex, i, set) {
+  set.done = true;
+  const justFinished = isComplete(ex);
+  if (justFinished) ex.expanded = false;
+  unlockAudio();
+  // Pas de chrono après la toute dernière série de la séance
+  if (nextSetPosition(state.draft)) startRest(ex.name); else stopRest();
+  await saveDraft();
+  render();
+  if (justFinished) {
+    const nextEx = state.draft.exercises.findIndex((e, k) => k > i && !isComplete(e));
+    if (nextEx >= 0) document.querySelector(`.exercise[data-ex="${nextEx}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    else document.querySelector('[data-action=finish]')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }
+}
+
+/* ---------- Ressenti d'une série : facile / moyen / dur (facultatif) ---------- */
+const FEELS = [
+  { id: 'easy', label: 'Facile', emoji: '🟢' },
+  { id: 'ok', label: 'Moyen', emoji: '🟡' },
+  { id: 'hard', label: 'Dur', emoji: '🔴' },
+];
+const feelEmoji = (id) => (FEELS.find((f) => f.id === id) || {}).emoji || '';
+
+// Les 3 pastilles d'une série. En séance, en toucher une valide aussi la série.
+function feelDots(set, action) {
+  return `<span class="feels">${FEELS.map((f) =>
+    `<button class="feel ${f.id} ${set.feel === f.id ? 'on' : ''}" data-action="${action}" data-feel="${f.id}" aria-label="${f.label}"></button>`).join('')}</span>`;
+}
+
+// Conseil pour aujourd'hui, d'après le ressenti de la dernière fois
+function feelTip(sets) {
+  const felt = sets.filter((s) => s.feel);
+  if (!felt.length) return '';
+  if (felt.every((s) => s.feel === 'easy')) return '<span class="feel-tip">💡 C\'était facile : essaie d\'augmenter le poids.</span>';
+  if (felt.some((s) => s.feel === 'hard')) return '<span class="feel-tip">💡 C\'était dur : garde le même poids et vise plus de reps.</span>';
+  return '';
+}
+
 // Prochaine série à faire : la 1re non cochée du 1er exercice pas terminé
 function nextSetPosition(d) {
   for (const [i, ex] of d.exercises.entries()) {
@@ -433,8 +473,9 @@ function viewWorkout() {
     const sets = ex.sets.map((s, j) => `
       <div class="set ${s.done ? 'done' : ''} ${next && next.i === i && next.j === j ? 'current' : ''}" data-set="${j}">
         <div class="set-top">
-          <span class="set-num">Série ${j + 1}${last && last.sets[j] ? `<span class="set-prev">Dernière fois : ${esc(fmtSet(last.sets[j]))}</span>` : ''}</span>
-          ${ex.sets.length > 1 ? '<button class="link" data-action="remove-set">Retirer</button>' : ''}
+          <span class="set-num">Série ${j + 1}${ex.sets.length > 1 ? ' <button class="link remove-set" data-action="remove-set" aria-label="Retirer la série">✕</button>' : ''}
+            ${last && last.sets[j] ? `<span class="set-prev">${feelEmoji(last.sets[j].feel)} avant : ${esc(fmtSet(last.sets[j]))}</span>` : ''}</span>
+          ${feelDots(s, 'set-feel')}
           <button class="check" data-action="toggle-done" aria-label="Série faite">✓</button>
         </div>
         <div class="set-fields">
@@ -457,7 +498,8 @@ function viewWorkout() {
         ${last
           ? `<div class="last">
               <strong>Dernière fois</strong> · ${fmtDate(last.date)}${last.templateName ? ` · ${esc(last.templateName)}` : ''}
-              <span class="last-sets">${last.sets.map((s, j) => `<span>S${j + 1} <b>${esc(fmtSet(s))}</b></span>`).join('')}</span>
+              <span class="last-sets">${last.sets.map((s, j) => `<span>S${j + 1} <b>${esc(fmtSet(s))}</b> ${feelEmoji(s.feel)}</span>`).join('')}</span>
+              ${feelTip(last.sets)}
             </div>`
           : `<p class="last first">${ex.brand ? `Première fois sur la machine ${esc(ex.brand)} 💪` : 'Première fois sur cet exercice 💪'}</p>`}
         ${ex.replaces ? `
@@ -628,6 +670,7 @@ function viewEditWorkout() {
           <div class="set-top">
             <span class="set-num">Série ${j + 1}</span>
             ${ex.sets.length > 1 ? '<button class="link" data-action="ew-remove-set">Retirer</button>' : ''}
+            ${feelDots(s, 'ew-feel')}
           </div>
           <div class="set-fields">
             ${stepper('reps', s.reps, 'Répétitions', true)}
@@ -1160,7 +1203,7 @@ async function finishWorkout() {
       name: e.name,
       ...(e.brand ? { brand: e.brand } : {}), // marque de la machine (suivi séparé)
       ...(e.replaces ? { replaces: e.replaces } : {}), // exercice remplacé ce jour-là (pour l'historique)
-      sets: e.sets.filter((s) => s.done).map((s) => ({ reps: s.reps, weight: s.weight })),
+      sets: e.sets.filter((s) => s.done).map((s) => ({ reps: s.reps, weight: s.weight, ...(s.feel ? { feel: s.feel } : {}) })),
     }))
     .filter((e) => e.sets.length);
   const count = exercises.reduce((a, e) => a + e.sets.length, 0);
@@ -2031,26 +2074,27 @@ $app.addEventListener('click', async (e) => {
       setValue(exEl, +setEl.dataset.set, input.dataset.field, Math.round(v * 100) / 100);
       return saveDraft();
     }
-    case 'toggle-done': {
-      set.done = !set.done;
-      const i = +exEl.dataset.ex;
-      const justFinished = set.done && isComplete(ex);
-      if (justFinished) ex.expanded = false; // l'exercice terminé se replie
+    case 'toggle-done':
       if (set.done) {
-        unlockAudio();
-        // Pas de chrono après la toute dernière série de la séance
-        if (nextSetPosition(state.draft)) startRest(ex.name); else stopRest();
+        set.done = false;
+        await saveDraft();
+        return render();
       }
-      await saveDraft();
-      render();
-      if (justFinished) {
-        // On passe directement à l'exercice suivant qui n'est pas fini
-        const nextEx = state.draft.exercises.findIndex((e, k) => k > i && !isComplete(e));
-        const target = document.querySelector(`.exercise[data-ex="${nextEx >= 0 ? nextEx : i}"]`);
-        if (nextEx >= 0) target?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-        else document.querySelector('[data-action=finish]')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      return completeSet(ex, +exEl.dataset.ex, set);
+    case 'set-feel': {
+      // Toucher la pastille déjà choisie l'enlève ; sinon on note le ressenti ET on valide la série
+      const feel = btn.dataset.feel;
+      if (set.feel === feel) {
+        delete set.feel;
+        await saveDraft();
+        return render();
       }
-      return;
+      set.feel = feel;
+      if (set.done) {
+        await saveDraft();
+        return render();
+      }
+      return completeSet(ex, +exEl.dataset.ex, set);
     }
     case 'expand-ex':
       ex.expanded = true;
@@ -2188,6 +2232,10 @@ $app.addEventListener('click', async (e) => {
       ewEx.sets.push({ reps: prev.reps, weight: prev.weight });
       return render();
     }
+    case 'ew-feel':
+      if (ewSet.feel === btn.dataset.feel) delete ewSet.feel;
+      else ewSet.feel = btn.dataset.feel;
+      return render();
     case 'ew-remove-set':
       ewEx.sets.splice(+btn.closest('[data-ews]').dataset.ews, 1);
       return render();
