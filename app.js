@@ -127,6 +127,7 @@ const state = {
   custom: {},         // exercices perso : clé → { key, name, primary, secondary }
   restTimes: {},      // temps de repos choisi par exercice : clé → secondes
   notes: {},          // note par exercice (réglage machine…) : clé → texte
+  brands: [],         // marques de machine ajoutées à la main
   bodyweight: [],     // pesées, de la plus ancienne à la plus récente
   progressView: 'global',
   globalPeriod: 'cycle',   // Progrès → Global : 'cycle', une durée en jours ('14', '90'…), 'all' ou 'custom'
@@ -147,13 +148,23 @@ const programTemplates = (programId) => state.templates
   .sort((a, b) => (a.order ?? 1e9) - (b.order ?? 1e9) || byCreation(a, b));
 
 // Où en est le cycle : dernière séance faite dans ce programme, et celle qui vient après
+// Le cycle avance par « tours » : un tour = chaque séance du programme faite une fois, dans n'importe quel ordre.
+// La séance du jour = la première (dans l'ordre du programme) pas encore faite dans le tour en cours.
+// Ex : Push → Pull → Legs → Bras ; si on fait Bras avant Legs, la suivante reste Legs.
 function cycleInfo(tpls) {
   const ids = new Set(tpls.map((t) => t.id));
-  const last = state.workouts.find((w) => ids.has(w.templateId)) || null;
-  const lastIndex = last ? tpls.findIndex((t) => t.id === last.templateId) : -1;
-  const next = tpls.length ? tpls[(lastIndex + 1) % tpls.length] : null;
-  const lastName = last ? (tpls[lastIndex]?.name || last.templateName) : null;
-  return { next, last, lastName };
+  const mine = state.workouts.filter((w) => ids.has(w.templateId)); // du plus récent au plus ancien
+  const last = mine[0] || null;
+  let round = new Set();
+  for (const w of [...mine].reverse()) {
+    // Séance déjà faite dans ce tour, ou tour complet : un nouveau tour commence
+    if (round.has(w.templateId) || round.size === tpls.length) round = new Set();
+    round.add(w.templateId);
+  }
+  if (round.size === tpls.length) round = new Set(); // tour terminé : on repart du début
+  const next = tpls.find((t) => !round.has(t.id)) || null;
+  const lastName = last ? (tpls.find((t) => t.id === last.templateId)?.name || last.templateName) : null;
+  return { next, last, lastName, doneThisRound: round };
 }
 
 function fmtAgo(iso) {
@@ -186,24 +197,31 @@ async function loadAll() {
   state.custom = Object.fromEntries((await dbAll('custom')).map((c) => [c.key, c]));
   state.restTimes = (await dbGet('meta', 'restTimes'))?.value || {};
   state.notes = (await dbGet('meta', 'notes'))?.value || {};
+  state.brands = (await dbGet('meta', 'brands'))?.value || [];
   state.bodyweight = (await dbAll('bodyweight')).sort((a, b) => a.date.localeCompare(b.date));
 }
 
 const saveDraft = () => (state.draft ? dbPut('meta', { key: 'draft', value: state.draft }) : dbDel('meta', 'draft'));
 
 // Dernière fois qu'on a fait cet exercice (toutes séances confondues)
-function lastPerf(name) {
-  const k = keyOf(name);
+// Une « variante » = un exercice + la marque de la machine (ou rien = la machine par défaut).
+// Chaque variante a son propre suivi : 45 kg sur une autre machine n'est pas une baisse par rapport à 60 kg.
+const perfKey = (name, brand) => keyOf(name) + (brand ? `|${norm(brand.trim())}` : '');
+const exPerfKey = (ex) => perfKey(ex.name, ex.brand);
+const variantLabel = (name, brand) => (brand ? `${name} · ${brand}` : name);
+
+function lastPerf(name, brand = null) {
+  const k = perfKey(name, brand);
   for (const w of state.workouts) {
-    const ex = w.exercises.find((e) => keyOf(e.name) === k);
+    const ex = w.exercises.find((e) => exPerfKey(e) === k);
     if (ex && ex.sets.length) return { date: w.date, sets: ex.sets, templateName: w.templateName };
   }
   return null;
 }
 
 // On pré-remplit avec la dernière perf : il suffit de cocher, ou d'ajuster
-function initialSets(name) {
-  const last = lastPerf(name);
+function initialSets(name, brand = null) {
+  const last = lastPerf(name, brand);
   if (last) return last.sets.map((s) => ({ reps: s.reps, weight: s.weight, done: false }));
   return [0, 1, 2].map(() => ({ reps: 10, weight: 0, done: false }));
 }
@@ -274,7 +292,7 @@ function viewProgram({ id }) {
       <button class="btn btn-primary" data-action="edit-program" data-id="${p.id}">+ Créer mes séances</button>`;
   }
 
-  const { next, last, lastName } = cycleInfo(tpls);
+  const { next, last, lastName, doneThisRound } = cycleInfo(tpls);
   const doneToday = last && fmtAgo(last.date) === "aujourd'hui";
 
   const hero = `
@@ -288,12 +306,13 @@ function viewProgram({ id }) {
 
   const steps = tpls.map((t, i) => {
     const isNext = t.id === next.id;
-    const isLast = last && t.id === last.templateId;
+    const done = doneThisRound.has(t.id);
+    const lastDone = state.workouts.find((w) => w.templateId === t.id);
     return `
-      <button class="cycle-step ${isNext ? 'next' : ''}" data-action="start" data-id="${t.id}">
-        <span class="cycle-num">${i + 1}</span>
+      <button class="cycle-step ${isNext ? 'next' : ''} ${done ? 'done' : ''}" data-action="start" data-id="${t.id}">
+        <span class="cycle-num">${done ? '✓' : i + 1}</span>
         <span class="cycle-name">${esc(t.name)}</span>
-        ${isNext ? '<span class="badge">Aujourd\'hui</span>' : isLast ? '<span class="tag">Faite ' + fmtAgo(last.date) + '</span>' : ''}
+        ${isNext ? '<span class="badge">Aujourd\'hui</span>' : done && lastDone ? `<span class="tag">Faite ${fmtAgo(lastDone.date)}</span>` : ''}
       </button>`;
   }).join('');
 
@@ -303,7 +322,7 @@ function viewProgram({ id }) {
     ${hero}
     <h3>Le cycle</h3>
     <div class="cycle">${steps}</div>
-    <p class="muted small">Tu peux toucher une autre séance pour la faire à la place : le cycle reprendra après celle-ci.</p>
+    <p class="muted small">Tu peux toucher n'importe quelle séance pour la faire aujourd'hui. Celles que tu sautes restent à faire dans ce tour du cycle (✓ = déjà faite).</p>
     <button class="btn btn-ghost" data-action="edit-program" data-id="${p.id}">✏️ Modifier ce programme</button>`;
 }
 
@@ -409,7 +428,8 @@ function viewWorkout() {
           </button>
         </section>`;
     }
-    const last = lastPerf(ex.name);
+    const last = lastPerf(ex.name, ex.brand);
+    const note = noteFor(ex.name, ex.brand);
     const sets = ex.sets.map((s, j) => `
       <div class="set ${s.done ? 'done' : ''} ${next && next.i === i && next.j === j ? 'current' : ''}" data-set="${j}">
         <div class="set-top">
@@ -433,20 +453,21 @@ function viewWorkout() {
             <button class="icon-btn" data-action="remove-ex" aria-label="Retirer l'exercice">✕</button>
           </div>
         </div>
+        <button class="brand-chip ${ex.brand ? 'on' : ''}" data-action="pick-brand">🏷 Machine : <strong>${esc(ex.brand || 'Par défaut')}</strong> ▾</button>
         ${last
           ? `<div class="last">
               <strong>Dernière fois</strong> · ${fmtDate(last.date)}${last.templateName ? ` · ${esc(last.templateName)}` : ''}
               <span class="last-sets">${last.sets.map((s, j) => `<span>S${j + 1} <b>${esc(fmtSet(s))}</b></span>`).join('')}</span>
             </div>`
-          : '<p class="last first">Première fois sur cet exercice 💪</p>'}
+          : `<p class="last first">${ex.brand ? `Première fois sur la machine ${esc(ex.brand)} 💪` : 'Première fois sur cet exercice 💪'}</p>`}
         ${ex.replaces ? `
           <p class="swap-note">⇄ À la place de <strong>${esc(ex.replaces)}</strong>
             <button class="link" data-action="unswap-ex">Remettre</button></p>` : ''}
-        ${noteFor(ex.name) ? `<button class="ex-note" data-action="edit-note" data-name="${esc(ex.name)}">📝 ${esc(noteFor(ex.name))}</button>` : ''}
+        ${note ? `<button class="ex-note" data-action="edit-note" data-name="${esc(ex.name)}" data-brand="${esc(ex.brand || '')}">📝 ${esc(note)}</button>` : ''}
         <div class="ex-tools">
           <button class="rest-btn" data-action="rest-config">⏱ <strong>${fmtClock(restFor(ex.name))}</strong></button>
           <button class="rest-btn" data-action="swap-ex">⇄ Remplacer</button>
-          <button class="rest-btn" data-action="edit-note" data-name="${esc(ex.name)}">📝 Note</button>
+          <button class="rest-btn" data-action="edit-note" data-name="${esc(ex.name)}" data-brand="${esc(ex.brand || '')}">📝 Note</button>
         </div>
         ${sets}
         <button class="btn btn-secondary" data-action="add-set">+ Ajouter une série</button>
@@ -505,8 +526,9 @@ function viewHistory() {
         <h2>${esc(w.templateName)}</h2>
         <span class="muted small">${w.programName ? esc(w.programName) + ' · ' : ''}${fmtDate(w.date)}</span>
       </div>
-      ${w.exercises.map((e) => `<p class="hist-ex"><strong>${esc(e.name)}${e.replaces ? ` <span class="muted small">⇄ à la place de ${esc(e.replaces)}</span>` : ''}</strong>${esc(fmtSets(e.sets))}</p>`).join('')}
-      <div class="btn-row" style="margin-top:12px">
+      ${w.exercises.map((e) => `<p class="hist-ex"><strong>${esc(variantLabel(e.name, e.brand))}${e.replaces ? ` <span class="muted small">⇄ à la place de ${esc(e.replaces)}</span>` : ''}</strong>${esc(fmtSets(e.sets))}</p>`).join('')}
+      <div class="btn-row three" style="margin-top:12px">
+        <button class="btn btn-secondary" data-action="recap-workout" data-id="${w.id}">📊 Bilan</button>
         <button class="btn btn-secondary" data-action="edit-workout" data-id="${w.id}">✏️ Modifier</button>
         <button class="btn btn-ghost" data-action="delete-workout" data-id="${w.id}">Supprimer</button>
       </div>
@@ -600,6 +622,7 @@ function viewEditWorkout() {
         <span class="ex-title">${esc(ex.name)}</span>
         <button class="icon-btn" data-action="ew-remove-ex" aria-label="Retirer l'exercice">✕</button>
       </div>
+      <button class="brand-chip ${ex.brand ? 'on' : ''}" data-action="ew-pick-brand">🏷 Machine : <strong>${esc(ex.brand || 'Par défaut')}</strong> ▾</button>
       ${ex.sets.map((s, j) => `
         <div class="set" data-ews="${j}">
           <div class="set-top">
@@ -659,10 +682,14 @@ const METRICS = {
   volume: { label: 'Volume', unit: 'kg', f: (sets) => sets.reduce((a, s) => a + s.reps * s.weight, 0) },
 };
 
-function exerciseNames() {
+// Exercices déjà faits, une entrée par variante (exercice + machine), du plus récent au plus ancien
+function exerciseVariants() {
   const map = new Map();
   for (const w of state.workouts) {
-    for (const e of w.exercises) if (!map.has(keyOf(e.name))) map.set(keyOf(e.name), e.name);
+    for (const e of w.exercises) {
+      const key = exPerfKey(e);
+      if (!map.has(key)) map.set(key, { key, name: e.name, brand: e.brand || null, label: variantLabel(e.name, e.brand) });
+    }
   }
   return [...map.values()];
 }
@@ -680,14 +707,17 @@ function viewProgress() {
 /* ---------- Progrès global : % de progression entre deux périodes ---------- */
 // Force estimée d'une série (formule d'Epley) : 10 × 60 kg vaut plus que 8 × 60 kg
 const estimatedMax = (s) => s.weight * (1 + s.reps / 30);
-const fmtPct = (x) => `${x > 0 ? '+' : ''}${fmtNum(Math.round(x * 1000) / 10)} %`;
+const fmtPct = (x) => {
+  const v = Math.round(x * 1000) / 10 || 0; // évite « -0 »
+  return `${v > 0 ? '+' : ''}${fmtNum(v)} %`;
+};
 
 // Meilleure performance de chaque exercice sur une liste de séances
 function bestPerfs(workouts) {
   const map = {};
   for (const w of workouts) {
     for (const ex of w.exercises) {
-      const p = (map[keyOf(ex.name)] ||= { name: ex.name, max: 0, reps: 0, weighted: false });
+      const p = (map[exPerfKey(ex)] ||= { name: ex.name, brand: ex.brand || null, max: 0, reps: 0, weighted: false });
       for (const s of ex.sets) {
         if (s.weight > 0) { p.weighted = true; p.max = Math.max(p.max, estimatedMax(s)); }
         p.reps = Math.max(p.reps, s.reps);
@@ -709,7 +739,7 @@ function compareWorkouts(current, previous) {
     const x = useWeight ? a.max : a.reps;
     const y = useWeight ? b.max : b.reps;
     if (!y) continue;
-    rows.push({ name: a.name, pct: (x - y) / y, muscles: (exerciseMuscles(a.name) || { primary: [] }).primary });
+    rows.push({ name: variantLabel(a.name, a.brand), pct: (x - y) / y, muscles: (exerciseMuscles(a.name) || { primary: [] }).primary });
   }
   return rows;
 }
@@ -723,8 +753,8 @@ function compareOverSpan(workouts) {
   const sessions = {}; // exercice → ses perfs, de la plus ancienne à la plus récente
   for (const w of [...workouts].reverse()) {
     for (const ex of w.exercises) {
-      const perf = bestPerfs([{ exercises: [ex] }])[keyOf(ex.name)];
-      (sessions[keyOf(ex.name)] ||= []).push(perf);
+      const perf = bestPerfs([{ exercises: [ex] }])[exPerfKey(ex)];
+      (sessions[exPerfKey(ex)] ||= []).push(perf);
     }
   }
   const rows = [];
@@ -736,7 +766,7 @@ function compareOverSpan(workouts) {
     const x = useWeight ? last.max : last.reps;
     const y = useWeight ? first.max : first.reps;
     if (!y) continue;
-    rows.push({ name: last.name, pct: (x - y) / y, muscles: (exerciseMuscles(last.name) || { primary: [] }).primary });
+    rows.push({ name: variantLabel(last.name, last.brand), pct: (x - y) / y, muscles: (exerciseMuscles(last.name) || { primary: [] }).primary });
   }
   return rows;
 }
@@ -896,16 +926,17 @@ async function saveBodyweight() {
 }
 
 function viewExerciseProgress() {
-  const names = exerciseNames();
-  if (!names.length) {
+  const variants = exerciseVariants();
+  if (!variants.length) {
     return `<div class="empty"><div class="big">📈</div><p>Termine ta première séance pour voir ta progression ici.</p></div>`;
   }
-  if (!state.progressExercise || !names.some((n) => keyOf(n) === keyOf(state.progressExercise))) {
-    state.progressExercise = names[0];
+  // state.progressExercise = clé de variante (exercice + machine)
+  if (!state.progressExercise || !variants.some((v) => v.key === state.progressExercise)) {
+    state.progressExercise = variants[0].key;
   }
-  const k = keyOf(state.progressExercise);
+  const k = state.progressExercise;
   const entries = state.workouts
-    .map((w) => ({ date: w.date, ex: w.exercises.find((e) => keyOf(e.name) === k) }))
+    .map((w) => ({ date: w.date, ex: w.exercises.find((e) => exPerfKey(e) === k) }))
     .filter((x) => x.ex && x.ex.sets.length)
     .reverse(); // de la plus ancienne à la plus récente
 
@@ -915,7 +946,7 @@ function viewExerciseProgress() {
   const record = Math.max(...entries.map((e) => METRICS.weight.f(e.ex.sets)));
   const diff = points.length > 1 ? points[points.length - 1].y - points[0].y : 0;
 
-  const options = names.map((n) => `<option ${keyOf(n) === k ? 'selected' : ''}>${esc(n)}</option>`).join('');
+  const options = variants.map((v) => `<option value="${esc(v.key)}" ${v.key === k ? 'selected' : ''}>${esc(v.label)}</option>`).join('');
   const seg = Object.entries(METRICS).map(([id, mm]) =>
     `<button class="${id === state.progressMetric ? 'on' : ''}" data-action="metric" data-id="${id}">${mm.label}</button>`).join('');
 
@@ -1127,6 +1158,7 @@ async function finishWorkout() {
   const exercises = d.exercises
     .map((e) => ({
       name: e.name,
+      ...(e.brand ? { brand: e.brand } : {}), // marque de la machine (suivi séparé)
       ...(e.replaces ? { replaces: e.replaces } : {}), // exercice remplacé ce jour-là (pour l'historique)
       sets: e.sets.filter((s) => s.done).map((s) => ({ reps: s.reps, weight: s.weight })),
     }))
@@ -1157,23 +1189,126 @@ async function finishWorkout() {
     }
   } else if (!(await askConfirm('Terminer la séance ?', `${count} série(s) seront enregistrées. Bravo 💪`, 'Terminer'))) return;
 
+  // Terminée le jour même : date = maintenant. Oubliée et terminée un autre jour : on garde le jour du début.
+  const now = new Date();
+  const sameDay = localDay(now) === localDay(new Date(d.startedAt));
   const workout = {
     id: uid(),
-    date: new Date().toISOString(),
+    date: sameDay ? now.toISOString() : d.startedAt,
     startedAt: d.startedAt,
+    endedAt: sameDay ? now.toISOString() : null, // fin inconnue si la séance a été terminée plus tard
     programName: d.programName || null,
     templateId: d.templateId,
     templateName: d.templateName,
     exercises,
   };
   await dbPut('workouts', workout);
-  state.workouts.unshift(workout);
+  state.workouts = [...state.workouts, workout].sort((a, b) => b.date.localeCompare(a.date));
   hideRest();
   state.draft = null;
   await saveDraft();
   render();
   scrollTo(0, 0);
-  toast('Séance enregistrée 💪');
+  showRecap(workout);
+  if (!sameDay) toast(`Enregistrée le ${fmtDate(workout.date)}, le jour où tu l'as commencée`);
+}
+
+/* ---------- Bilan de séance : évolution par rapport à la dernière fois ---------- */
+// Meilleure série d'une liste : force estimée (poids × reps) si chargée, sinon nombre de reps
+function bestOf(sets) {
+  const weighted = sets.some((s) => s.weight > 0);
+  let best = null;
+  let value = 0;
+  for (const s of sets) {
+    const v = weighted ? estimatedMax(s) : s.reps;
+    if (v > value) { value = v; best = s; }
+  }
+  return { weighted, value, set: best };
+}
+
+const tonnageOf = (w) => w.exercises.reduce((a, e) => a + e.sets.reduce((b, s) => b + s.reps * s.weight, 0), 0);
+const setsOf = (w) => w.exercises.reduce((a, e) => a + e.sets.length, 0);
+
+// before = séances plus anciennes que celle-ci, de la plus récente à la plus ancienne
+function buildRecap(workout, before) {
+  const exercises = workout.exercises.filter((e) => e.sets.length).map((ex) => {
+    const key = exPerfKey(ex);
+    const now = bestOf(ex.sets);
+    const previous = before.flatMap((w) => w.exercises.filter((x) => exPerfKey(x) === key && x.sets.length));
+    const prev = previous[0] ? bestOf(previous[0].sets) : null;
+    const comparable = prev && prev.weighted === now.weighted && prev.value > 0;
+    const bestEver = Math.max(0, ...previous.map((x) => bestOf(x.sets)).filter((b) => b.weighted === now.weighted).map((b) => b.value));
+    return {
+      label: variantLabel(ex.name, ex.brand),
+      pct: comparable ? (now.value - prev.value) / prev.value : null,
+      best: now.set,
+      prevBest: comparable ? prev.set : null,
+      isNew: !previous.length,
+      record: previous.length > 0 && now.value > bestEver + 1e-9,
+    };
+  });
+  const compared = exercises.filter((r) => r.pct !== null);
+  const sameSession = workout.templateId ? before.find((w) => w.templateId === workout.templateId) : null;
+  const minutes = workout.endedAt && workout.startedAt ? Math.round((new Date(workout.endedAt) - new Date(workout.startedAt)) / 60000) : null;
+  return {
+    exercises,
+    avg: compared.length ? compared.reduce((a, r) => a + r.pct, 0) / compared.length : null,
+    compared: compared.length,
+    records: exercises.filter((r) => r.record).length,
+    sets: setsOf(workout),
+    reps: workout.exercises.reduce((a, e) => a + e.sets.reduce((b, s) => b + s.reps, 0), 0),
+    tonnage: tonnageOf(workout),
+    prevTonnage: sameSession ? tonnageOf(sameSession) : null,
+    prevDate: sameSession ? sameSession.date : null,
+    minutes: minutes !== null && minutes > 0 && minutes < 600 ? minutes : null,
+  };
+}
+
+function showRecap(workout) {
+  const before = state.workouts.filter((w) => w.id !== workout.id && w.date < workout.date);
+  const r = buildRecap(workout, before);
+  const cls = (x) => (x > 0.0005 ? 'up' : x < -0.0005 ? 'down' : '');
+  const fmtDuration = (m) => (m >= 60 ? `${Math.floor(m / 60)} h ${pad2(m % 60)}` : `${m} min`);
+  const tonnagePct = r.prevTonnage ? (r.tonnage - r.prevTonnage) / r.prevTonnage : null;
+
+  const hero = r.avg !== null ? `
+    <section class="card global-hero">
+      <span class="stat-label">Évolution par rapport à la dernière fois</span>
+      <span class="global-pct ${cls(r.avg)}">${fmtPct(r.avg)}</span>
+      <span class="muted small">moyenne sur ${r.compared} exercice${r.compared > 1 ? 's' : ''}${r.records ? ` · 🏆 ${r.records} record${r.records > 1 ? 's' : ''}` : ''}</span>
+    </section>` : `
+    <section class="card global-hero">
+      <span class="global-pct">🎉</span>
+      <span class="muted small">Première fois sur ces exercices : à la prochaine séance, tu verras ton évolution ici.</span>
+    </section>`;
+
+  const rows = r.exercises.map((e) => `
+    <div class="recap-row">
+      <div class="recap-top">
+        <span class="recap-name">${esc(e.label)}${e.record ? ' <span class="badge">🏆 Record</span>' : ''}</span>
+        <strong class="${e.pct !== null ? cls(e.pct) : ''}">${e.pct !== null ? fmtPct(e.pct) : e.isNew ? 'nouveau' : '–'}</strong>
+      </div>
+      ${e.best ? `<span class="muted small">Meilleure série : <b>${esc(fmtSet(e.best))}</b>${e.prevBest ? ` · avant : ${esc(fmtSet(e.prevBest))}` : ''}</span>` : ''}
+    </div>`).join('');
+
+  $sheet.querySelector('.sheet-body').innerHTML = `
+    <div class="sheet-head">
+      <div><h2>${esc(workout.templateName)} 💪</h2><span class="muted small">${fmtDate(workout.date)}${workout.programName ? ' · ' + esc(workout.programName) : ''}</span></div>
+      <button class="icon-btn" data-sheet="close" aria-label="Fermer">✕</button>
+    </div>
+    ${hero}
+    <div class="stats recap-stats">
+      ${r.minutes !== null ? `<div class="stat"><div class="stat-value">${fmtDuration(r.minutes)}</div><div class="stat-label">Durée</div></div>` : ''}
+      <div class="stat"><div class="stat-value">${r.sets}</div><div class="stat-label">Séries · ${r.reps} reps</div></div>
+      <div class="stat"><div class="stat-value">${Math.round(r.tonnage).toLocaleString('fr-FR')}<span class="small"> kg</span></div>
+        <div class="stat-label">Tonnage${tonnagePct !== null ? ` <span class="${cls(tonnagePct)}">${fmtPct(tonnagePct)}</span>` : ''}</div></div>
+    </div>
+    ${r.prevDate ? `<p class="muted small">Tonnage comparé à ta séance ${esc(workout.templateName)} du ${fmtDate(r.prevDate)}</p>` : ''}
+    <h3>Par exercice</h3>
+    <section class="card">${rows}</section>
+    <p class="muted small">Évolution = ta meilleure série comparée à la dernière fois sur le même exercice (et la même machine), poids et reps combinés.</p>
+    <button class="btn btn-primary" data-sheet="close">Fermer</button>`;
+  $sheet.hidden = false;
 }
 
 async function discardWorkout() {
@@ -1196,6 +1331,7 @@ async function exportData() {
     bodyweight: state.bodyweight,
     restTimes: state.restTimes,
     notes: state.notes,
+    brands: state.brands,
   };
   const name = `muscu-${new Date().toISOString().slice(0, 10)}.json`;
   const file = new File([JSON.stringify(data, null, 2)], name, { type: 'application/json' });
@@ -1236,6 +1372,7 @@ function isValidBackup(data) {
       && data.bodyweight.every((b) => b && /^\d{4}-\d{2}-\d{2}$/.test(b.date) && Number.isFinite(b.weight))))
     && (data.restTimes === undefined || (data.restTimes && typeof data.restTimes === 'object'))
     && (data.notes === undefined || (data.notes && typeof data.notes === 'object'))
+    && (data.brands === undefined || (Array.isArray(data.brands) && data.brands.every((b) => typeof b === 'string')))
     && (data.custom === undefined || (Array.isArray(data.custom) && data.custom.every((c) => c && typeof c.key === 'string'
       && typeof c.name === 'string' && Array.isArray(c.primary) && Array.isArray(c.secondary))))
     && data.templates.every((t) => t && t.id && typeof t.name === 'string' && Array.isArray(t.exercises))
@@ -1263,6 +1400,7 @@ async function importData(file) {
   (data.bodyweight || []).forEach((b) => tx.objectStore('bodyweight').put(b));
   if (data.restTimes) tx.objectStore('meta').put({ key: 'restTimes', value: { ...state.restTimes, ...data.restTimes } });
   if (data.notes) tx.objectStore('meta').put({ key: 'notes', value: { ...state.notes, ...data.notes } });
+  if (data.brands) tx.objectStore('meta').put({ key: 'brands', value: [...new Set([...state.brands, ...data.brands])] });
   data.templates.forEach((t) => tx.objectStore('templates').put(t));
   data.workouts.forEach((w) => tx.objectStore('workouts').put(w));
   await new Promise((res, rej) => { tx.oncomplete = res; tx.onerror = () => rej(tx.error); });
@@ -1499,21 +1637,64 @@ const $sheet = document.getElementById('sheet');
 
 const muscleLabels = (list) => list.map((m) => MUSCLE_LABELS[m]).join(', ');
 
-/* ---------- Note par exercice (réglage de la machine, sensation…) ---------- */
-const noteFor = (name) => state.notes[keyOf(name)] || '';
+/* ---------- Marque de la machine (Hammer, Technogym…) ---------- */
+const DEFAULT_BRANDS = ['Hammer Strength', 'Matrix', 'Technogym', 'Gym80', 'Life Fitness', 'Panatta', 'Cybex', 'Precor', 'Nautilus', 'Star Trac', 'Eleiko', 'Prime'];
+let brandPick = { current: null, onPick: null };
 
-async function editNote(name) {
+// Toutes les marques proposées : la liste de base + celles que tu as ajoutées ou déjà utilisées
+function allBrands() {
+  const used = state.workouts.flatMap((w) => w.exercises.map((e) => e.brand)).filter(Boolean);
+  const seen = new Map();
+  for (const b of [...DEFAULT_BRANDS, ...(state.brands || []), ...used]) if (!seen.has(norm(b))) seen.set(norm(b), b);
+  return [...seen.values()];
+}
+
+function openBrandSheet(current, onPick) {
+  brandPick = { current: current || null, onPick };
+  const opt = (brand, label) => `
+    <button class="brand-opt ${(brand || null) === (current || null) ? 'on' : ''}" data-sheet="brand-pick" data-brand="${esc(brand || '')}">
+      <span class="pk-check">✓</span><span>${label}</span>
+    </button>`;
+  $sheet.querySelector('.sheet-body').innerHTML = `
+    <div class="sheet-head">
+      <div><h2>Quelle machine ?</h2><span class="muted small">Chaque machine a son propre suivi de perfs</span></div>
+      <button class="icon-btn" data-sheet="close" aria-label="Fermer">✕</button>
+    </div>
+    ${opt(null, '<strong>Par défaut</strong> <span class="muted small">· ta machine habituelle</span>')}
+    ${allBrands().map((b) => opt(b, esc(b))).join('')}
+    <button class="btn btn-ghost" data-sheet="brand-other">+ Autre marque…</button>`;
+  $sheet.hidden = false;
+}
+
+async function addOtherBrand() {
+  const name = (await askText('Nom de la marque ou de la machine', '', 'Ajouter') || '').trim();
+  if (!name) return;
+  const known = allBrands().find((b) => norm(b) === norm(name));
+  const brand = known || name;
+  if (!known) {
+    state.brands = [...(state.brands || []), brand];
+    await dbPut('meta', { key: 'brands', value: state.brands });
+  }
+  closeSheet();
+  brandPick.onPick(brand);
+}
+
+/* ---------- Note par exercice (réglage de la machine, sensation…) ---------- */
+// Une note par exercice ET par machine : le réglage du siège n'est pas le même d'une marque à l'autre
+const noteFor = (name, brand = null) => state.notes[perfKey(name, brand)] || '';
+
+async function editNote(name, brand = null) {
   const text = await openDialog({
-    title: `Note : ${name}`,
-    message: 'Elle s\'affichera sur cet exercice à chaque séance.',
-    input: noteFor(name),
+    title: `Note : ${variantLabel(name, brand)}`,
+    message: brand ? `Elle s'affichera quand tu fais cet exercice sur la machine ${brand}.` : 'Elle s\'affichera sur cet exercice à chaque séance.',
+    input: noteFor(name, brand),
     multiline: true,
     placeholder: 'ex : siège cran 4, poignées position 2',
     okLabel: 'Enregistrer',
   });
   if (text === null) return false;
-  if (text) state.notes[keyOf(name)] = text;
-  else delete state.notes[keyOf(name)];
+  if (text) state.notes[perfKey(name, brand)] = text;
+  else delete state.notes[perfKey(name, brand)];
   await dbPut('meta', { key: 'notes', value: state.notes });
   toast(text ? 'Note enregistrée 📝' : 'Note supprimée');
   return true;
@@ -1658,6 +1839,11 @@ $sheet.addEventListener('click', async (e) => {
       return renderRestSheet();
     case 'rest-save':
       return saveRestSheet();
+    case 'brand-pick':
+      closeSheet();
+      return brandPick.onPick(btn.dataset.brand || null);
+    case 'brand-other':
+      return addOtherBrand();
     case 'edit-note':
       if (await editNote(btn.dataset.name)) {
         openSheet(btn.dataset.name);
@@ -1887,8 +2073,22 @@ $app.addEventListener('click', async (e) => {
       await saveDraft();
       return render();
     case 'edit-note':
-      if (await editNote(btn.dataset.name)) render();
+      if (await editNote(btn.dataset.name, btn.dataset.brand || null)) render();
       return;
+    case 'pick-brand': {
+      const i = +exEl.dataset.ex;
+      return openBrandSheet(ex.brand, async (brand) => {
+        const target = state.draft.exercises[i];
+        if ((target.brand || null) === brand) return;
+        target.brand = brand || undefined;
+        if (!brand) delete target.brand;
+        // Rien de coché : on pré-remplit avec la dernière perf sur CETTE machine
+        if (!target.sets.some((s) => s.done)) target.sets = initialSets(target.name, brand);
+        await saveDraft();
+        render();
+        toast(brand ? `Machine : ${brand}` : 'Machine par défaut');
+      });
+    }
     case 'swap-ex': {
       const i = +exEl.dataset.ex;
       const original = ex.replaces || ex.name;
@@ -1965,6 +2165,8 @@ $app.addEventListener('click', async (e) => {
       state.histDay = state.histDay === btn.dataset.day ? null : btn.dataset.day;
       return render();
 
+    case 'recap-workout':
+      return showRecap(state.workouts.find((x) => x.id === btn.dataset.id));
     case 'edit-workout': {
       const w = state.workouts.find((x) => x.id === btn.dataset.id);
       state.editWorkout = { ...JSON.parse(JSON.stringify(w)), day: localDay(new Date(w.date)) };
@@ -1998,6 +2200,12 @@ $app.addEventListener('click', async (e) => {
         for (const name of names) {
           state.editWorkout.exercises.push({ name, sets: initialSets(name).map(({ reps, weight }) => ({ reps, weight })) });
         }
+        render();
+      });
+    case 'ew-pick-brand':
+      return openBrandSheet(ewEx.brand, (brand) => {
+        if (brand) ewEx.brand = brand;
+        else delete ewEx.brand;
         render();
       });
     case 'ew-save':
