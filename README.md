@@ -51,6 +51,8 @@ Tout est stocké **sur le téléphone** (IndexedDB), et l'app marche **sans rés
   l'écran passe au suivant (« Modifier › » pour le rouvrir).
 - Avant de terminer, l'app prévient s'il reste des séries pas cochées (elles ne seraient pas enregistrées).
 - Pas de chrono après la toute dernière série.
+- **Ressenti** de chaque série : 3 pastilles 🟢 facile · 🟡 moyen · 🔴 dur (facultatif). En toucher une valide
+  la série. À la séance suivante, le ressenti s'affiche à côté de la perf, avec un conseil (augmenter ou garder le poids).
 - **Bilan de fin de séance** après « Terminer » : évolution en % par rapport à la dernière fois, durée,
   séries, reps, tonnage, et le détail par exercice avec les 🏆 records. À revoir depuis l'Historique (📊 Bilan).
 - Une séance commencée un jour et terminée le lendemain est enregistrée au jour où tu l'as commencée.
