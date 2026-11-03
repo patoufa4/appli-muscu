@@ -138,6 +138,10 @@ input, textarea, select { font: inherit; }
   border-bottom: 1px solid var(--border);
 }
 .wk-title { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.wk-elapsed {
+  display: inline-block; padding: 1px 7px; border-radius: 7px;
+  background: var(--surface-2); color: var(--text); font-weight: 700; font-variant-numeric: tabular-nums;
+}
 .wk-title strong { font-size: 20px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .wk-progress { height: 5px; margin-top: 4px; border-radius: 99px; background: var(--surface-2); overflow: hidden; }
 .wk-progress span { display: block; height: 100%; background: var(--ok); transition: width 0.3s; }
