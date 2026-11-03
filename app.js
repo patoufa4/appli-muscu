@@ -362,14 +362,16 @@ function viewEditProgram({ id }) {
 }
 
 function viewEditTemplate(r) {
+  const links = r.links || [];
   const rows = r.exercises.map((name, i) => `
-    <div class="ex-row">
+    <div class="ex-row ${links[i] || links[i - 1] ? 'in-ss' : ''}">
       <span class="cycle-num">${i + 1}</span>
       <button class="ex-row-name" data-action="info" data-name="${esc(name)}">${esc(name)}</button>
       <button class="icon-btn" data-action="ex-move" data-i="${i}" data-dir="-1" aria-label="Monter" ${i === 0 ? 'disabled' : ''}>↑</button>
       <button class="icon-btn" data-action="ex-move" data-i="${i}" data-dir="1" aria-label="Descendre" ${i === r.exercises.length - 1 ? 'disabled' : ''}>↓</button>
       <button class="icon-btn" data-action="ex-remove" data-i="${i}" aria-label="Retirer">✕</button>
-    </div>`).join('');
+    </div>
+    ${i < r.exercises.length - 1 ? linkButton(i, !!links[i], 'tpl-link') : ''}`).join('');
 
   return `
     <button class="back" data-action="edit-program" data-id="${r.programId}">‹ Annuler</button>
@@ -404,18 +406,21 @@ const isComplete = (ex) => ex.sets.length > 0 && ex.sets.every((s) => s.done);
 // Valide une série : chrono de repos, et si l'exercice est fini il se replie et on passe au suivant
 async function completeSet(ex, i, set) {
   set.done = true;
-  const justFinished = isComplete(ex);
-  if (justFinished) ex.expanded = false;
+  const exs = state.draft.exercises;
+  if (isComplete(ex)) ex.expanded = false;
   unlockAudio();
-  // Pas de chrono après la toute dernière série de la séance
-  if (nextSetPosition(state.draft)) startRest(ex.name); else stopRest();
+  const next = nextSetPosition(state.draft);
+  // Superset : pas de repos tant qu'il reste l'exercice suivant du même tour
+  const [, b] = groupOf(exs, i);
+  const partnerNext = next && next.i > i && next.i <= b;
+  if (!next) stopRest(); // pas de chrono après la toute dernière série
+  else if (partnerNext) stopRest();
+  else startRest(ex.name);
   await saveDraft();
   render();
-  if (justFinished) {
-    const nextEx = state.draft.exercises.findIndex((e, k) => k > i && !isComplete(e));
-    if (nextEx >= 0) document.querySelector(`.exercise[data-ex="${nextEx}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    else document.querySelector('[data-action=finish]')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-  }
+  // On amène l'écran sur la prochaine série si elle est sur un autre exercice
+  if (!next) document.querySelector('[data-action=finish]')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  else if (next.i !== i) document.querySelector(`.exercise[data-ex="${next.i}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
 /* ---------- Ressenti d'une série : facile / moyen / dur (facultatif) ---------- */
@@ -442,10 +447,46 @@ function feelTip(sets) {
 }
 
 // Prochaine série à faire : la 1re non cochée du 1er exercice pas terminé
+/* ---------- Supersets : exercices consécutifs liés (linkNext = lié au suivant) ---------- */
+// Indices [début, fin] du groupe de superset qui contient l'exercice i (début = fin si pas de superset)
+function groupOf(exs, i) {
+  let a = i;
+  while (a > 0 && exs[a - 1].linkNext) a--;
+  let b = i;
+  while (b < exs.length - 1 && exs[b].linkNext) b++;
+  return [a, b];
+}
+
+// Lettre de chaque superset (A, B…) ou null
+function supersetLetters(exs) {
+  const letters = [];
+  let n = 0;
+  exs.forEach((e, i) => {
+    if (i > 0 && exs[i - 1].linkNext) letters[i] = letters[i - 1];
+    else letters[i] = e.linkNext && i < exs.length - 1 ? String.fromCharCode(65 + n++) : null;
+  });
+  return letters;
+}
+
+// Bouton entre deux exercices pour les lier (ou délier) en superset
+function linkButton(i, linked, action) {
+  return `<button class="ss-between ${linked ? 'on' : ''}" data-action="${action}" data-i="${i}">
+    ${linked ? '🔗 En superset avec le suivant · délier' : '🔗 Lier en superset'}</button>`;
+}
+
+// Prochaine série à faire. Dans un superset, on alterne : série 1 de A, série 1 de B, série 2 de A…
 function nextSetPosition(d) {
-  for (const [i, ex] of d.exercises.entries()) {
-    const j = ex.sets.findIndex((s) => !s.done);
-    if (j >= 0) return { i, j };
+  const exs = d.exercises;
+  for (let i = 0; i < exs.length;) {
+    const [a, b] = groupOf(exs, i);
+    const rounds = Math.max(...exs.slice(a, b + 1).map((e) => e.sets.length));
+    for (let j = 0; j < rounds; j++) {
+      for (let k = a; k <= b; k++) {
+        const s = exs[k].sets[j];
+        if (s && !s.done) return { i: k, j };
+      }
+    }
+    i = b + 1;
   }
   return null;
 }
@@ -456,7 +497,7 @@ function viewWorkout() {
   const total = d.exercises.reduce((a, ex) => a + ex.sets.length, 0);
   const doneCount = d.exercises.reduce((a, ex) => a + ex.sets.filter((s) => s.done).length, 0);
 
-  const exercises = d.exercises.map((ex, i) => {
+  const cards = d.exercises.map((ex, i) => {
     // Exercice terminé : replié sur une ligne (on peut le rouvrir)
     if (isComplete(ex) && !ex.expanded) {
       return `
@@ -515,6 +556,17 @@ function viewWorkout() {
         <button class="btn btn-secondary" data-action="add-set">+ Ajouter une série</button>
         ${isComplete(ex) ? '<button class="link" data-action="collapse-ex">Replier ▴</button>' : ''}
       </section>`;
+  });
+
+  // Supersets : les exercices liés sont regroupés dans un cadre violet, avec un bouton 🔗 entre chaque exercice
+  const letters = supersetLetters(d.exercises);
+  const exercises = cards.map((html, i) => {
+    const l = letters[i];
+    const opens = l && (i === 0 || letters[i - 1] !== l);
+    const closes = l && letters[i + 1] !== l;
+    const link = i < cards.length - 1 ? linkButton(i, !!d.exercises[i].linkNext, 'link-ex') : '';
+    // Le bouton entre deux exercices d'un même superset reste dans le cadre ; après le dernier, il est en dehors
+    return `${opens ? `<div class="ss-group"><span class="ss-tag">🔗 Superset ${l} · enchaîne sans repos</span>` : ''}${html}${closes ? '</div>' : ''}${link}`;
   }).join('');
 
   return `
@@ -568,7 +620,7 @@ function viewHistory() {
         <h2>${esc(w.templateName)}</h2>
         <span class="muted small">${w.programName ? esc(w.programName) + ' · ' : ''}${fmtDate(w.date)}</span>
       </div>
-      ${w.exercises.map((e) => `<p class="hist-ex"><strong>${esc(variantLabel(e.name, e.brand))}${e.replaces ? ` <span class="muted small">⇄ à la place de ${esc(e.replaces)}</span>` : ''}</strong>${esc(fmtSets(e.sets))}</p>`).join('')}
+      ${w.exercises.map((e, k, all) => `<p class="hist-ex"><strong>${supersetLetters(all)[k] ? `<span class="ss-mini">🔗 ${supersetLetters(all)[k]}</span> ` : ''}${esc(variantLabel(e.name, e.brand))}${e.replaces ? ` <span class="muted small">⇄ à la place de ${esc(e.replaces)}</span>` : ''}</strong>${esc(fmtSets(e.sets))}</p>`).join('')}
       <div class="btn-row three" style="margin-top:12px">
         <button class="btn btn-secondary" data-action="recap-workout" data-id="${w.id}">📊 Bilan</button>
         <button class="btn btn-secondary" data-action="edit-workout" data-id="${w.id}">✏️ Modifier</button>
@@ -1034,9 +1086,12 @@ function chartSVG(points) {
   const line = points.map((p, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)},${y(p.y).toFixed(1)}`).join(' ');
   const area = `${line} L${x(points.length - 1).toFixed(1)},${H - pb} L${pl},${H - pb} Z`;
   const showValues = points.length <= 12;
+  // Une étiquette seulement quand la valeur change (sinon elles se chevauchent sur les paliers)
+  const changed = (i) => i === 0 || points[i].y !== points[i - 1].y;
+  const lastLabel = points.reduce((k, p, i) => (changed(i) ? i : k), 0);
   const dots = points.map((p, i) => `
     <circle class="dot" cx="${x(i)}" cy="${y(p.y)}" r="4"/>
-    ${showValues || i === points.length - 1 ? `<text class="val" x="${x(i)}" y="${y(p.y) - 9}" text-anchor="${i === 0 ? 'start' : i === points.length - 1 ? 'end' : 'middle'}">${fmtNum(p.y)}</text>` : ''}`).join('');
+    ${(showValues && changed(i)) || i === lastLabel ? `<text class="val" x="${x(i)}" y="${y(p.y) - 9}" text-anchor="${i === 0 ? 'start' : i === points.length - 1 ? 'end' : 'middle'}">${fmtNum(p.y)}</text>` : ''}`).join('');
 
   const last = points.length - 1;
   const xLabels = `
@@ -1188,7 +1243,8 @@ async function startWorkout(template) {
     templateId: template ? template.id : null,
     templateName: template ? template.name : 'Séance libre',
     startedAt: new Date().toISOString(),
-    exercises: exercises.map((name) => ({ name, sets: initialSets(name) })),
+    // links[k] = l'exercice k est en superset avec le suivant (réglé dans le modèle de séance)
+    exercises: exercises.map((name, k) => ({ name, sets: initialSets(name), ...(template && template.links && template.links[k] && k < exercises.length - 1 ? { linkNext: true } : {}) })),
   };
   await saveDraft();
   render();
@@ -1202,6 +1258,7 @@ async function finishWorkout() {
     .map((e) => ({
       name: e.name,
       ...(e.brand ? { brand: e.brand } : {}), // marque de la machine (suivi séparé)
+      ...(e.linkNext ? { linkNext: true } : {}), // en superset avec l'exercice suivant
       ...(e.replaces ? { replaces: e.replaces } : {}), // exercice remplacé ce jour-là (pour l'historique)
       sets: e.sets.filter((s) => s.done).map((s) => ({ reps: s.reps, weight: s.weight, ...(s.feel ? { feel: s.feel } : {}) })),
     }))
@@ -1500,7 +1557,8 @@ async function saveTemplate() {
 
   const existing = state.templates.find((t) => t.id === r.id);
   const fresh = { id: uid(), programId: r.programId, order: programTemplates(r.programId).length, createdAt: new Date().toISOString() };
-  const t = { ...(existing || fresh), name, exercises };
+  const links = exercises.map((_, i) => !!(r.links && r.links[i]) && i < exercises.length - 1);
+  const t = { ...(existing || fresh), name, exercises, links };
   await dbPut('templates', t);
   if (existing) Object.assign(existing, t);
   else state.templates.push(t);
@@ -2157,9 +2215,17 @@ $app.addEventListener('click', async (e) => {
       await saveDraft();
       return render();
     }
+    case 'link-ex': {
+      const e = state.draft.exercises[+btn.dataset.i];
+      if (e.linkNext) delete e.linkNext; else e.linkNext = true;
+      await saveDraft();
+      return render();
+    }
     case 'move-ex': {
       const list = state.draft.exercises, i = +exEl.dataset.ex, j = i + +btn.dataset.dir;
       if (j < 0 || j >= list.length) return;
+      // Déplacer un exercice défait les supersets autour de lui (on les relie ensuite si besoin)
+      for (const k of [i - 1, i, j - 1, j]) if (list[k]) delete list[k].linkNext;
       [list[i], list[j]] = [list[j], list[i]];
       await saveDraft();
       render();
@@ -2167,6 +2233,7 @@ $app.addEventListener('click', async (e) => {
     }
     case 'remove-ex':
       if (!(await askConfirm('Retirer l\'exercice ?', `« ${ex.name} » sera retiré de la séance du jour.`, 'Retirer', true))) return;
+      if (!ex.linkNext && state.draft.exercises[+exEl.dataset.ex - 1]) delete state.draft.exercises[+exEl.dataset.ex - 1].linkNext;
       state.draft.exercises.splice(+exEl.dataset.ex, 1);
       await saveDraft();
       return render();
@@ -2309,7 +2376,7 @@ $app.addEventListener('click', async (e) => {
       return go({ name: 'editTemplate', id: null, programId: btn.dataset.id, tplName: '', exercises: [] });
     case 'edit-template': {
       const t = state.templates.find((x) => x.id === btn.dataset.id);
-      return go({ name: 'editTemplate', id: t.id, programId: t.programId, tplName: t.name, exercises: [...t.exercises] });
+      return go({ name: 'editTemplate', id: t.id, programId: t.programId, tplName: t.name, exercises: [...t.exercises], links: [...(t.links || [])] });
     }
     case 'info':
       return openSheet(btn.dataset.name);
@@ -2321,14 +2388,26 @@ $app.addEventListener('click', async (e) => {
         r.exercises.push(...names.filter((n) => !r.exercises.some((x) => norm(x) === norm(n))));
         render();
       });
+    case 'tpl-link': {
+      const links = (state.route.links ||= []);
+      links[+btn.dataset.i] = !links[+btn.dataset.i];
+      return render();
+    }
     case 'ex-move': {
       const list = state.route.exercises, i = +btn.dataset.i, j = i + +btn.dataset.dir;
+      const links = (state.route.links ||= []);
+      for (const k of [i - 1, i, j - 1, j]) links[k] = false; // déplacer défait les supersets autour
       [list[i], list[j]] = [list[j], list[i]];
       return render();
     }
-    case 'ex-remove':
-      state.route.exercises.splice(+btn.dataset.i, 1);
+    case 'ex-remove': {
+      const i = +btn.dataset.i;
+      const links = (state.route.links ||= []);
+      if (!links[i]) links[i - 1] = false;
+      links.splice(i, 1);
+      state.route.exercises.splice(i, 1);
       return render();
+    }
     case 'delete-template': {
       const t = state.templates.find((x) => x.id === btn.dataset.id);
       if (!(await askConfirm('Supprimer la séance ?', `« ${t.name} » sera retirée du programme.\nTon historique est conservé.`, 'Supprimer', true))) return;
