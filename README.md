@@ -57,6 +57,12 @@ Tout est stocké **sur le téléphone** (IndexedDB), et l'app marche **sans rés
   séries, reps, tonnage, et le détail par exercice avec les 🏆 records. À revoir depuis l'Historique (📊 Bilan).
 - Une séance commencée un jour et terminée le lendemain est enregistrée au jour où tu l'as commencée.
 
+## Supersets
+
+- Entre deux exercices (en séance ou dans le modèle de séance) : **🔗 Lier en superset**. Les exercices liés
+  sont dans un cadre violet ; l'app alterne les séries (S1 de A, S1 de B, S2 de A…) et ne lance le chrono de
+  repos qu'après le dernier exercice du superset. On peut lier 3 exos ou plus (tri-set).
+
 ## Remplacer un exercice
 
 - Pendant la séance, bouton **⇄ Remplacer** sur chaque exercice (machine prise…) : choisis l'alternative
