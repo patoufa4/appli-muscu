@@ -144,6 +144,23 @@ input, textarea, select { font: inherit; }
 .wk-finish { flex: none; width: auto; min-height: 44px; margin: 0; padding: 0 16px; font-size: 16px; }
 .exercise { scroll-margin-top: calc(var(--safe-top) + 84px); }
 
+/* Supersets */
+.ss-group {
+  margin: 12px -6px; padding: 8px 6px 2px; border-radius: 22px;
+  background: rgba(139, 108, 240, 0.12); border: 2px solid #8b6cf0;
+}
+.ss-group > .card { margin: 6px 0; }
+.ss-tag { display: block; padding: 2px 8px; font-size: 13px; font-weight: 700; color: #cbbcff; }
+.ss-between {
+  display: block; margin: -4px auto; padding: 6px 14px; min-height: 34px; position: relative; z-index: 1;
+  background: var(--bg); border: 1px dashed var(--border); border-radius: 99px;
+  color: var(--muted); font-size: 13px;
+}
+.ss-between.on { background: #8b6cf0; border: 0; color: #fff; }
+.ss-mini { font-size: 12px; color: #cbbcff; }
+.ex-row.in-ss { border-left: 3px solid #8b6cf0; padding-left: 6px; }
+.card .ss-between { margin: 2px auto 6px; }
+
 /* Exercice terminé : replié sur une ligne */
 .exercise.collapsed { padding: 0; }
 .ex-collapsed {
