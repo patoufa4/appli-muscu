@@ -318,6 +318,24 @@ input, textarea, select { font: inherit; }
 .field-label { display: block; font-size: 14px; color: var(--muted); margin: 16px 0 6px; }
 .ex-row { display: flex; align-items: center; gap: 6px; padding: 8px 0; border-top: 1px solid var(--border); }
 .ex-row-name { flex: 1; font-weight: 600; min-width: 0; }
+.ex-row { flex-direction: column; align-items: stretch; }
+.ex-row-main { display: flex; align-items: center; gap: 6px; }
+/* Nombre de séries d'un exercice dans la séance modèle */
+.sets-stepper { display: flex; align-items: center; gap: 10px; margin: 6px 0 2px 36px; }
+.sets-stepper button {
+  width: 36px; height: 36px; border-radius: 10px; border: 1px solid var(--border);
+  background: var(--surface-2); font-size: 20px; font-weight: 600;
+}
+.sets-stepper button:disabled { opacity: 0.3; }
+.sets-stepper span { min-width: 74px; text-align: center; font-size: 15px; }
+.vol-chip {
+  padding: 6px 10px; border-radius: 99px; background: var(--surface); border: 1px solid var(--border); font-size: 14px;
+}
+/* Repère de volume par semaine */
+.zone { margin-left: 6px; padding: 1px 7px; border-radius: 99px; font-size: 11px; font-weight: 700; vertical-align: 2px; }
+.zone.low { background: rgba(242, 201, 76, 0.18); color: #f2c94c; }
+.zone.ok { background: rgba(53, 196, 106, 0.18); color: #35c46a; }
+.zone.high { background: rgba(255, 107, 53, 0.18); color: #ff9a6e; }
 .ex-row-name::after { content: "i"; margin-left: 6px; vertical-align: 1px; width: 18px; height: 18px; font-size: 11px; }
 
 /* ---------- Recherche d'exercices ---------- */
