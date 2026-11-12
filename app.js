@@ -234,11 +234,23 @@ function lastPerf(name, brand = null) {
 }
 
 // On pré-remplit avec la dernière perf : il suffit de cocher, ou d'ajuster
-function initialSets(name, brand = null) {
+// count = nombre de séries voulu (réglé dans la séance modèle) ; sinon autant que la dernière fois (ou 3)
+function initialSets(name, brand = null, count = null) {
   const last = lastPerf(name, brand);
-  if (last) return last.sets.map((s) => ({ reps: s.reps, weight: s.weight, done: false }));
-  return [0, 1, 2].map(() => ({ reps: 10, weight: 0, done: false }));
+  let sets = last ? last.sets.map((s) => ({ reps: s.reps, weight: s.weight, done: false })) : [];
+  if (!count) return sets.length ? sets : [0, 1, 2].map(() => ({ reps: 10, weight: 0, done: false }));
+  if (!sets.length) sets = [{ reps: 10, weight: 0, done: false }];
+  while (sets.length < count) sets.push({ ...sets[sets.length - 1] }); // séries en plus : comme la dernière
+  return sets.slice(0, count);
 }
+
+const DEFAULT_SETS = 3;
+const MAX_SETS = 10;
+// Nombre de séries prévu pour l'exercice k d'une séance modèle (null si jamais réglé : on garde la dernière fois)
+const tplSetCount = (t, k) => (t.sets && t.sets[k]) || null;
+// Valeur affichée / utilisée par défaut : comme la dernière fois, sinon 3
+const defaultSetsFor = (name) => Math.min(MAX_SETS, (lastPerf(name) || { sets: [] }).sets.length || DEFAULT_SETS);
+const plannedSets = (t, k) => tplSetCount(t, k) || defaultSetsFor(t.exercises[k]);
 
 /* =====================================================================
    Écrans
@@ -354,7 +366,7 @@ function viewEditProgram({ id }) {
           <button class="icon-btn" data-action="move-template" data-id="${t.id}" data-dir="1" aria-label="Descendre" ${i === tpls.length - 1 ? 'disabled' : ''}>↓</button>
         </div>
       </div>
-      <p class="muted small">${t.exercises.length ? t.exercises.map(esc).join(' · ') : 'Aucun exercice'}</p>
+      <p class="muted small">${t.exercises.length ? t.exercises.map((n, k) => `${esc(n)} <b>×${plannedSets(t, k)}</b>`).join(' · ') : 'Aucun exercice'}</p>
       <div class="btn-row" style="margin-top:12px">
         <button class="btn btn-secondary" data-action="edit-template" data-id="${t.id}">Modifier</button>
         <button class="btn btn-ghost" data-action="delete-template" data-id="${t.id}">Supprimer</button>
@@ -372,20 +384,37 @@ function viewEditProgram({ id }) {
     ${cards || '<p class="muted">Aucune séance. Ajoute ta première ci-dessous.</p>'}
     ${tpls.length > 1 ? '<p class="muted small">Utilise ↑ ↓ pour changer l\'ordre.</p>' : ''}
     <button class="btn btn-primary" data-action="new-template" data-id="${p.id}">+ Ajouter une séance</button>
+    ${viewPlannedVolume(p, tpls)}
     <button class="btn btn-danger" data-action="delete-program" data-id="${p.id}">Supprimer ce programme</button>`;
 }
 
 function viewEditTemplate(r) {
   const links = r.links || [];
-  const rows = r.exercises.map((name, i) => `
+  const sets = r.sets || [];
+  const rows = r.exercises.map((name, i) => {
+    const n = sets[i] || defaultSetsFor(name);
+    return `
     <div class="ex-row ${links[i] || links[i - 1] ? 'in-ss' : ''}">
-      <span class="cycle-num">${i + 1}</span>
-      <button class="ex-row-name" data-action="info" data-name="${esc(name)}">${esc(name)}</button>
-      <button class="icon-btn" data-action="ex-move" data-i="${i}" data-dir="-1" aria-label="Monter" ${i === 0 ? 'disabled' : ''}>↑</button>
-      <button class="icon-btn" data-action="ex-move" data-i="${i}" data-dir="1" aria-label="Descendre" ${i === r.exercises.length - 1 ? 'disabled' : ''}>↓</button>
-      <button class="icon-btn" data-action="ex-remove" data-i="${i}" aria-label="Retirer">✕</button>
+      <div class="ex-row-main">
+        <span class="cycle-num">${i + 1}</span>
+        <button class="ex-row-name" data-action="info" data-name="${esc(name)}">${esc(name)}</button>
+        <button class="icon-btn" data-action="ex-move" data-i="${i}" data-dir="-1" aria-label="Monter" ${i === 0 ? 'disabled' : ''}>↑</button>
+        <button class="icon-btn" data-action="ex-move" data-i="${i}" data-dir="1" aria-label="Descendre" ${i === r.exercises.length - 1 ? 'disabled' : ''}>↓</button>
+        <button class="icon-btn" data-action="ex-remove" data-i="${i}" aria-label="Retirer">✕</button>
+      </div>
+      <div class="sets-stepper">
+        <button data-action="tpl-sets" data-i="${i}" data-delta="-1" aria-label="Une série de moins" ${n <= 1 ? 'disabled' : ''}>−</button>
+        <span><strong>${n}</strong> série${n > 1 ? 's' : ''}</span>
+        <button data-action="tpl-sets" data-i="${i}" data-delta="1" aria-label="Une série de plus" ${n >= MAX_SETS ? 'disabled' : ''}>+</button>
+      </div>
     </div>
-    ${i < r.exercises.length - 1 ? linkButton(i, !!links[i], 'tpl-link') : ''}`).join('');
+    ${i < r.exercises.length - 1 ? linkButton(i, !!links[i], 'tpl-link') : ''}`;
+  }).join('');
+
+  // Volume de cette séance, en direct pendant que tu la construis
+  const vol = plannedVolume([{ exercises: r.exercises, sets: r.exercises.map((name, i) => sets[i] || defaultSetsFor(name)) }]);
+  const volLine = Object.entries(vol).sort((a, b) => b[1].direct - a[1].direct || b[1].indirect - a[1].indirect)
+    .map(([m, v]) => `<span class="vol-chip">${MUSCLE_LABELS[m]} ${v.direct ? `<b>${v.direct}</b>` : ''}${v.indirect ? ` <span class="muted">${v.direct ? '+' : ''}${v.indirect} ind.</span>` : ''}</span>`).join('');
 
   return `
     <button class="back" data-action="edit-program" data-id="${r.programId}">‹ Annuler</button>
@@ -397,6 +426,10 @@ function viewEditTemplate(r) {
       ${rows || '<p class="muted small">Aucun exercice pour l\'instant.</p>'}
       <button class="btn btn-secondary" data-action="pick-exercises">🔍 Ajouter des exercices</button>
     </section>
+    ${volLine ? `
+      <h3>Séries par muscle dans cette séance</h3>
+      <div class="chips-wrap">${volLine}</div>
+      <p class="muted small">En gras : séries où le muscle est le principal ; en gris : séries indirectes.</p>` : ''}
     <button class="btn btn-primary btn-xl" data-action="save-template">Enregistrer la séance</button>`;
 }
 
@@ -736,7 +769,7 @@ function startPastWorkout(day, templateId) {
     templateId: t ? t.id : null,
     templateName: t ? t.name : 'Séance libre',
     // Pré-rempli avec ta dernière perf sur chaque exercice : il ne reste qu'à corriger
-    exercises: t ? t.exercises.map((name) => ({ name, sets: initialSets(name).map(({ reps, weight }) => ({ reps, weight })) })) : [],
+    exercises: t ? t.exercises.map((name, k) => ({ name, sets: initialSets(name, null, tplSetCount(t, k)).map(({ reps, weight }) => ({ reps, weight })) })) : [],
   };
   closeSheet();
   render();
@@ -1193,6 +1226,75 @@ function volumeWorkouts(period) {
   return { workouts, desc: `Les ${tpls.length} dernières séances de ${esc(program.name)} (${tpls.map((t) => esc(t.name)).join(' → ')})` };
 }
 
+// Volume PRÉVU d'une liste de séances modèles (avant même de s'entraîner) : séries par muscle
+function plannedVolume(templates) {
+  const vol = {};
+  for (const t of templates) {
+    t.exercises.forEach((name, k) => {
+      const n = plannedSets(t, k);
+      const muscles = exerciseMuscles(name);
+      if (!muscles) return;
+      for (const m of muscles.primary) (vol[m] ||= { direct: 0, indirect: 0 }).direct += n;
+      for (const m of muscles.secondary) (vol[m] ||= { direct: 0, indirect: 0 }).indirect += n;
+    });
+  }
+  return vol;
+}
+
+// Section « Volume prévu » d'un programme : par cycle, ou par semaine selon le nombre de séances par semaine
+function viewPlannedVolume(p, tpls) {
+  if (!tpls.some((t) => t.exercises.length)) return '';
+  const perWeek = p.perWeek || tpls.length;
+  const weekly = state.planView !== 'cycle';
+  const factor = weekly ? perWeek / tpls.length : 1;
+  const raw = plannedVolume(tpls);
+  const muscles = Object.keys(MUSCLE_LABELS);
+  const get = (m) => ({ direct: Math.round((raw[m]?.direct || 0) * factor * 10) / 10, indirect: Math.round((raw[m]?.indirect || 0) * factor * 10) / 10 });
+  const score = (m) => get(m).direct + get(m).indirect / 2;
+  const maxScore = Math.max(...muscles.map(score)) || 1;
+  const maxBar = Math.max(...muscles.map((m) => get(m).direct + get(m).indirect)) || 1;
+  const intensity = Object.fromEntries(muscles.map((m) => [m, score(m) / maxScore]));
+  // Repère par semaine (une série indirecte compte pour ½) : moins de 10 = un peu bas, 10 à 20 = bien, plus de 20 = beaucoup
+  const zone = (d) => (!weekly ? '' : d < 10 ? '<span class="zone low">peu</span>' : d <= 20 ? '<span class="zone ok">bien</span>' : '<span class="zone high">beaucoup</span>');
+
+  const rows = muscles.slice().sort((a, b) => score(b) - score(a)).map((m) => {
+    const { direct, indirect } = get(m);
+    return `
+      <div class="vol-row ${direct + indirect ? '' : 'zero'}">
+        <div class="vol-top">
+          <span class="vol-name">${MUSCLE_LABELS[m]} ${direct + indirect ? zone(score(m)) : ''}</span>
+          <span><strong class="vol-num">${fmtNum(direct)}</strong> série${direct > 1 ? 's' : ''}${indirect ? ` <span class="muted small">+ ${fmtNum(indirect)} indirecte${indirect > 1 ? 's' : ''}</span>` : ''}</span>
+        </div>
+        <div class="vol-bar">
+          <span class="vb-direct" style="width:${(direct / maxBar) * 100}%"></span><span class="vb-indirect" style="width:${(indirect / maxBar) * 100}%"></span>
+        </div>
+      </div>`;
+  }).join('');
+
+  const seg = [['week', 'Par semaine'], ['cycle', 'Par cycle']].map(([id, label]) =>
+    `<button class="${(id === 'week') === weekly ? 'on' : ''}" data-action="plan-view" data-id="${id}">${label}</button>`).join('');
+  const perWeekChips = [2, 3, 4, 5, 6, 7].map((n) =>
+    `<button class="chip ${n === perWeek ? 'on' : ''}" data-action="prog-week" data-id="${p.id}" data-n="${n}">${n}×</button>`).join('');
+
+  return `
+    <h3>📊 Volume prévu</h3>
+    <p class="muted small">Calculé à partir des exercices et du nombre de séries de tes séances, avant même de commencer.</p>
+    <div class="seg two">${seg}</div>
+    ${weekly ? `
+      <span class="field-label">Séances par semaine</span>
+      <div class="chips-wrap">${perWeekChips}</div>
+      <p class="muted small">${perWeek === tpls.length ? 'Un cycle complet par semaine.' : `${perWeek} séances par semaine pour un cycle de ${tpls.length} : ${fmtNum(Math.round(factor * 100) / 100)} cycle par semaine.`}</p>` : `
+      <p class="muted small">Un cycle = tes ${tpls.length} séance${tpls.length > 1 ? 's' : ''} faite${tpls.length > 1 ? 's' : ''} une fois.</p>`}
+    <section class="card">
+      <div class="sheet-maps">
+        <figure>${bodyHeatSVG('front', intensity)}<figcaption>Devant</figcaption></figure>
+        <figure>${bodyHeatSVG('back', intensity)}<figcaption>Derrière</figcaption></figure>
+      </div>
+    </section>
+    <section class="card">${rows}</section>
+    ${weekly ? '<p class="muted small">Repère courant : environ 10 à 20 séries par muscle et par semaine pour progresser (une série indirecte compte pour ½).</p>' : ''}`;
+}
+
 // Séries directes (muscle principal) et indirectes (muscle secondaire) par muscle
 function computeVolume(workouts) {
   const vol = {};
@@ -1333,7 +1435,8 @@ async function startWorkout(template) {
     templateName: template ? template.name : 'Séance libre',
     startedAt: new Date().toISOString(),
     // links[k] = l'exercice k est en superset avec le suivant (réglé dans le modèle de séance)
-    exercises: exercises.map((name, k) => ({ name, sets: initialSets(name), ...(template && template.links && template.links[k] && k < exercises.length - 1 ? { linkNext: true } : {}) })),
+    // Autant de séries que prévu dans la séance modèle, pré-remplies avec la dernière perf
+    exercises: exercises.map((name, k) => ({ name, sets: initialSets(name, null, template ? tplSetCount(template, k) : null), ...(template && template.links && template.links[k] && k < exercises.length - 1 ? { linkNext: true } : {}) })),
   };
   await saveDraft();
   render();
@@ -1650,7 +1753,8 @@ async function saveTemplate() {
   const existing = state.templates.find((t) => t.id === r.id);
   const fresh = { id: uid(), programId: r.programId, order: programTemplates(r.programId).length, createdAt: new Date().toISOString() };
   const links = exercises.map((_, i) => !!(r.links && r.links[i]) && i < exercises.length - 1);
-  const t = { ...(existing || fresh), name, exercises, links };
+  const sets = exercises.map((n, i) => Math.min(MAX_SETS, Math.max(1, (r.sets && r.sets[i]) || defaultSetsFor(n))));
+  const t = { ...(existing || fresh), name, exercises, links, sets };
   await dbPut('templates', t);
   if (existing) Object.assign(existing, t);
   else state.templates.push(t);
@@ -2505,10 +2609,10 @@ $app.addEventListener('click', async (e) => {
       return deleteProgram(btn.dataset.id);
 
     case 'new-template':
-      return go({ name: 'editTemplate', id: null, programId: btn.dataset.id, tplName: '', exercises: [] });
+      return go({ name: 'editTemplate', id: null, programId: btn.dataset.id, tplName: '', exercises: [], sets: [], links: [] });
     case 'edit-template': {
       const t = state.templates.find((x) => x.id === btn.dataset.id);
-      return go({ name: 'editTemplate', id: t.id, programId: t.programId, tplName: t.name, exercises: [...t.exercises], links: [...(t.links || [])] });
+      return go({ name: 'editTemplate', id: t.id, programId: t.programId, tplName: t.name, exercises: [...t.exercises], links: [...(t.links || [])], sets: t.exercises.map((_, k) => plannedSets(t, k)) });
     }
     case 'info':
       return openSheet(btn.dataset.name);
@@ -2517,7 +2621,11 @@ $app.addEventListener('click', async (e) => {
     case 'pick-exercises':
       return openPicker((names) => {
         const r = state.route;
-        r.exercises.push(...names.filter((n) => !r.exercises.some((x) => norm(x) === norm(n))));
+        const added = names.filter((n) => !r.exercises.some((x) => norm(x) === norm(n)));
+        r.sets = (r.sets || []).slice(0, r.exercises.length);
+        while (r.sets.length < r.exercises.length) r.sets.push(defaultSetsFor(r.exercises[r.sets.length]));
+        r.exercises.push(...added);
+        r.sets.push(...added.map(defaultSetsFor));
         render();
       });
     case 'tpl-link': {
@@ -2525,11 +2633,28 @@ $app.addEventListener('click', async (e) => {
       links[+btn.dataset.i] = !links[+btn.dataset.i];
       return render();
     }
+    case 'plan-view':
+      state.planView = btn.dataset.id;
+      return render();
+    case 'prog-week': {
+      const p = state.programs.find((x) => x.id === btn.dataset.id);
+      p.perWeek = +btn.dataset.n;
+      await dbPut('programs', p);
+      return render();
+    }
+    case 'tpl-sets': {
+      const sets = (state.route.sets ||= []);
+      const i = +btn.dataset.i;
+      sets[i] = Math.min(MAX_SETS, Math.max(1, (sets[i] || defaultSetsFor(state.route.exercises[i])) + +btn.dataset.delta));
+      return render();
+    }
     case 'ex-move': {
       const list = state.route.exercises, i = +btn.dataset.i, j = i + +btn.dataset.dir;
       const links = (state.route.links ||= []);
+      const sets = (state.route.sets ||= []);
       for (const k of [i - 1, i, j - 1, j]) links[k] = false; // déplacer défait les supersets autour
       [list[i], list[j]] = [list[j], list[i]];
+      [sets[i], sets[j]] = [sets[j], sets[i]];
       return render();
     }
     case 'ex-remove': {
@@ -2537,6 +2662,7 @@ $app.addEventListener('click', async (e) => {
       const links = (state.route.links ||= []);
       if (!links[i]) links[i - 1] = false;
       links.splice(i, 1);
+      (state.route.sets ||= []).splice(i, 1);
       state.route.exercises.splice(i, 1);
       return render();
     }
