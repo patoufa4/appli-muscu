@@ -12,6 +12,13 @@ Tout est stocké **sur le téléphone** (IndexedDB), et l'app marche **sans rés
   pour chaque séance.
 - **Modifier** : ouvre le programme → *Modifier ce programme* → renomme-le, ajoute / modifie /
   supprime des séances, et change leur **ordre** avec les flèches ↑ ↓.
+- **Nombre de séries** : dans une séance (*Modifier*), chaque exercice a des boutons **− / +** (1 à 10 séries).
+  La séance démarre avec ce nombre de séries (pré-remplies avec tes perfs de la dernière fois).
+  En dessous, les **séries par muscle** de la séance se mettent à jour en direct.
+- **📊 Volume prévu** (en bas de *Modifier ce programme*) : séries par muscle **par semaine** ou **par cycle**,
+  calculées avant même de commencer, avec la carte du corps. Choisis combien de séances tu fais par semaine
+  (2× à 7×). Repère par semaine : *peu* (moins de 10), *bien* (10 à 20), *beaucoup* (plus de 20) ; une série
+  indirecte compte pour ½.
 - **Le cycle** : les séances tournent dans l'ordre (ex : Push → Pull → Legs → Push…). En ouvrant
   le programme, l'app t'affiche en gros **la séance du jour** : la première du cycle pas encore faite
   dans le tour en cours. Tu peux faire les séances dans le désordre (touche-en une autre) : celles que tu
